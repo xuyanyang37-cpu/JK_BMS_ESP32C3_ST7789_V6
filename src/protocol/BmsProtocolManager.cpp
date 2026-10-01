@@ -1,8 +1,26 @@
+/*
+ * ================================================================
+ * BmsProtocolManager.cpp
+ *
+ * 作用：协议“总调度员”。
+ *
+ * 原始数据进来后：
+ *   ① 找帧头
+ *   ② 判断完整长度
+ *   ③ 根据帧头识别协议
+ *   ④ 把完整帧交给具体协议类
+ *   ⑤ 具体协议更新 g_bmsData
+ *
+ * 注意：这里不解析具体电压/电流字节。
+ * 那些属于 JK/ANT/JBD/Daly/TT 各自的协议知识。
+ * ================================================================
+ */
+
 #include "BmsProtocolManager.h"
 
 BmsProtocolManager::BmsProtocolManager() : activeProtocol_(nullptr) {}
 
-void BmsProtocolManager::begin(bool protocol32S) {
+// [初始化] 默认从 JK 开始；收到其他协议帧后 activeProtocol_ 会自动切换。\nvoid BmsProtocolManager::begin(bool protocol32S) {
   jkProtocol_.setProtocol32S(protocol32S);
   activeProtocol_ = &jkProtocol_;
 }
@@ -15,7 +33,7 @@ bool BmsProtocolManager::isProtocol32S() const {
   return jkProtocol_.isProtocol32S();
 }
 
-BmsProtocol* BmsProtocolManager::detectProtocol(const uint8_t* d,size_t n) {
+// [分支] 按顺序尝试识别协议。第一个能处理该帧的协议获胜。\nBmsProtocol* BmsProtocolManager::detectProtocol(const uint8_t* d,size_t n) {
   if (jkProtocol_.canHandle(d,n)) return &jkProtocol_;
   if (antProtocol_.canHandle(d,n)) return &antProtocol_;
   if (jbdProtocol_.canHandle(d,n)) return &jbdProtocol_;
@@ -24,7 +42,7 @@ BmsProtocol* BmsProtocolManager::detectProtocol(const uint8_t* d,size_t n) {
   return nullptr;
 }
 
-bool BmsProtocolManager::parseFrame(const uint8_t* d,size_t n,BmsData&o) {
+// [入口] 已经拿到完整帧后，从这里进入具体协议解析器。\nbool BmsProtocolManager::parseFrame(const uint8_t* d,size_t n,BmsData&o) {
   BmsProtocol* p=detectProtocol(d,n);
   if(!p) return false;
   activeProtocol_=p;
@@ -36,7 +54,7 @@ bool BmsProtocolManager::buildCommand(uint8_t c,uint8_t n,uint8_t out[20]) {
   return activeProtocol_->buildCommand(c,n,out);
 }
 
-int BmsProtocolManager::findFrameStart(const uint8_t*d,size_t n) {
+// [入口] BLE层不知道协议帧头，所以由这里统一搜索。\nint BmsProtocolManager::findFrameStart(const uint8_t*d,size_t n) {
   int best=-1;
   BmsProtocol* list[]={&jkProtocol_,&antProtocol_,&jbdProtocol_,&dalyProtocol_,&ttProtocol_};
   for(size_t i=0;i<sizeof(list)/sizeof(list[0]);i++){
@@ -53,7 +71,7 @@ size_t BmsProtocolManager::expectedFrameLength() const {
   return activeProtocol_ ? activeProtocol_->expectedFrameLength() : 300;
 }
 
-size_t BmsProtocolManager::frameLength(const uint8_t* p,size_t n) const {
+// [入口] 固定长度协议和4E57变长JK协议统一从这里获取实际帧长。\nsize_t BmsProtocolManager::frameLength(const uint8_t* p,size_t n) const {
   return activeProtocol_ ? activeProtocol_->frameLength(p,n) : 0;
 }
 
