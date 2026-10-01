@@ -11,7 +11,7 @@ public:
   bool buildCommand(uint8_t,uint8_t,uint8_t[20]) override;
   size_t expectedFrameLength() const override { return frameLength_; }
 private:
-  size_t frameLength_=0;
+  mutable size_t frameLength_=0;
   static uint16_t crc16(const uint8_t*,size_t);
   static uint16_t u16le(const uint8_t*);
   static uint32_t u32le(const uint8_t*);
