@@ -68,17 +68,18 @@ namespace {
                             const String& value,
                             uint16_t color) {
     sprite.fillSprite(TFT_BLACK);
-    sprite.fillRoundRect(0, 0, 168, 27, 7, UI_PANEL);
+    sprite.fillRoundRect(0, 0, 168, 28, 7, UI_PANEL);
 
-    sprite.drawCircle(15, 13, 11, color);
+    // 右侧四项统一放大，尽量填满 28px 高的卡片。
+    sprite.drawCircle(15, 14, 11, color);
     sprite.setTextColor(color, UI_PANEL);
     sprite.drawCentreString(String(icon), 15, 5, 2);
 
-    FontGB2312::drawText(sprite, 31, 5,
+    FontGB2312::drawText(sprite, 31, 7,
                          String(label), color, UI_PANEL, 1);
 
     sprite.setTextColor(color, UI_PANEL);
-    sprite.drawRightString(value, 164, 5, 2);
+    sprite.drawRightString(value, 164, 1, 4);
   }
 }
 
@@ -105,9 +106,9 @@ void Display::begin() {
   rowSprite_.setColorDepth(16);
   barSprite_.setColorDepth(16);
 
-  socSprite_.createSprite(140, 78);
-  leftInfoSprite_.createSprite(140, 67);
-  rowSprite_.createSprite(168, 27);
+  socSprite_.createSprite(140, 114);
+  leftInfoSprite_.createSprite(140, 27);
+  rowSprite_.createSprite(168, 28);
   barSprite_.createSprite(312, 11);
 
   socSprite_.fillSprite(TFT_BLACK);
@@ -433,40 +434,42 @@ void Display::drawDashboard(const BmsData& d, bool force) {
 
 void Display::drawSoc(const BmsData& d) {
   socSprite_.fillSprite(TFT_BLACK);
-  drawPanel(socSprite_, 0, 0, 140, 78);
+  // 左侧 SOC 主卡片扩大，数字占据主要视觉区域。
+  drawPanel(socSprite_, 0, 0, 140, 114);
 
   String value = String(d.soc, 0);
   uint16_t color = socColor(d.soc);
 
   socSprite_.setTextColor(color, UI_PANEL);
-  socSprite_.drawCentreString(value, 70, -1, 7);
+  socSprite_.drawCentreString(value, 68, 20, 7);
 
   socSprite_.setTextColor(color, UI_PANEL);
-  socSprite_.drawString("%", 108, 47, 4);
+  socSprite_.drawString("%", 106, 73, 4);
 
   socSprite_.pushSprite(4, 4);
 }
 
 void Display::drawTemperature(const BmsData& d) {
   leftInfoSprite_.fillSprite(TFT_BLACK);
-  leftInfoSprite_.fillRoundRect(0, 0, 73, 67, 7, UI_PANEL);
+  // 温度/容量区高度与右侧“剩余里程”一致，避免原来的 67px 大块占屏。
+  // 两个小卡片宽度合计 140px，与 SOC 主卡片一致。
+  leftInfoSprite_.fillRoundRect(0, 0, 68, 27, 7, UI_PANEL);
+  leftInfoSprite_.fillRoundRect(72, 0, 68, 27, 7, UI_PANEL);
 
-  String temp = String(d.temperature1, 1) + "C";
+  String temp = String(d.temperature1, 0) + "C";
   String delta = String(d.deltaCellVoltage * 1000.0f, 0) + "mV";
 
   leftInfoSprite_.setTextColor(UI_TEMP, UI_PANEL);
-  leftInfoSprite_.drawString(temp, 4, 3, 2);
-  leftInfoSprite_.drawString(delta, 4, 31, 2);
-
-  leftInfoSprite_.fillRoundRect(75, 0, 65, 67, 7, UI_PANEL);
+  leftInfoSprite_.drawString(temp, 4, 7, 2);
+  leftInfoSprite_.drawString(delta, 34, 7, 2);
 
   leftInfoSprite_.setTextColor(UI_WHITE, UI_PANEL);
-  leftInfoSprite_.drawCentreString("Ah", 107, 1, 2);
+  leftInfoSprite_.drawCentreString("Ah", 87, 1, 1);
 
   String cap = String(d.remainingCapacityAh, 1);
-  leftInfoSprite_.drawCentreString(cap, 107, 24, 4);
+  leftInfoSprite_.drawCentreString(cap, 119, 5, 2);
 
-  leftInfoSprite_.pushSprite(4, 84);
+  leftInfoSprite_.pushSprite(4, 123);
 }
 
 void Display::drawVoltage(const BmsData& d) {
@@ -480,19 +483,19 @@ void Display::drawCurrent(const BmsData& d) {
   drawMetricRow(rowSprite_, 'A', "电流",
                 String(d.current, 1) + "A",
                 UI_CURRENT);
-  rowSprite_.pushSprite(148, 33);
+  rowSprite_.pushSprite(148, 34);
 }
 
 void Display::drawPower(const BmsData& d) {
   drawMetricRow(rowSprite_, 'W', "功率",
                 String(d.power, 0) + "W",
                 UI_POWER);
-  rowSprite_.pushSprite(148, 62);
+  rowSprite_.pushSprite(148, 64);
 }
 
 void Display::drawRange(const BmsData& d) {
   rowSprite_.fillSprite(TFT_BLACK);
-  rowSprite_.fillRoundRect(0, 0, 168, 27, 7, UI_PANEL);
+  rowSprite_.fillRoundRect(0, 0, 168, 28, 7, UI_PANEL);
 
   FontGB2312::drawText(rowSprite_, 8, 5,
                        "剩余里程",
@@ -503,7 +506,7 @@ void Display::drawRange(const BmsData& d) {
       String(d.remainingRangeKm, 0) + " KM",
       164, 5, 2);
 
-  rowSprite_.pushSprite(148, 91);
+  rowSprite_.pushSprite(148, 94);
 }
 
 void Display::drawSocBar(const BmsData& d) {
