@@ -56,6 +56,7 @@ private:
   static void notifyCallback(NimBLERemoteCharacteristic*,uint8_t*,size_t,bool);
   void handleNotification(const uint8_t*,size_t);
   void request(uint8_t);
+  void requestAntStatus();
   bool isCandidate(const NimBLEAdvertisedDevice*) const;
   void setStatus(BmsBootState state,const String& message);
 };
