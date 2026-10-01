@@ -34,9 +34,12 @@
 #include <string.h>
 
 static const char* SERVICE="FFE0";
-static const char* WRITE_CHAR="FFE1";
-static const char* NOTIFY_CHAR="FFE2";
+static const char* JK_NOTIFY_UUID="FFE1";
+static const char* JK_WRITE_UUID="FFE2";
 BmsBle* BmsBle::instance_=nullptr;
+static uint8_t g_rxBuf[700];
+static size_t g_rxLen=0;
+static bool g_legacyAckSeen=false;
 
 BmsBle::BmsBle()
   : client_(nullptr),ch_(nullptr),writeCh_(nullptr),notifyCh_(nullptr),
@@ -108,7 +111,9 @@ bool BmsBle::isCandidate(const NimBLEAdvertisedDevice* d) const{
   String n=d->getName().c_str();
   n.toUpperCase();
   return d->isAdvertisingService(NimBLEUUID(SERVICE)) ||
-         n.indexOf("JK")>=0 || n.indexOf("JIKONG")>=0 || n.indexOf("BMS")>=0;
+         n.indexOf("JK")>=0 || n.indexOf("JIKONG")>=0 || n.indexOf("BMS")>=0 ||
+         n.indexOf("ANT")>=0 || n.indexOf("JBD")>=0 || n.indexOf("DALY")>=0 ||
+         n.indexOf("TT")>=0 || n.indexOf("铁塔")>=0;
 }
 
 // [流程1] 扫描附近设备，只保留 JK/BMS/指定Service 的候选设备。\nuint8_t BmsBle::scanDevices(uint32_t sec){
@@ -221,13 +226,14 @@ bool BmsBle::connectDeviceByIndex(uint8_t index){
     return false;
   }
 
-  // JK 常见实现中 FFE1/FFE2 的读写方向并不完全一致。
-  // 不再把 UUID 强行绑定为 write/notify，而是根据实际 BLE 属性选择。
-  NimBLERemoteCharacteristic* ffe1=s->getCharacteristic(NimBLEUUID(WRITE_CHAR));
-  NimBLERemoteCharacteristic* ffe2=s->getCharacteristic(NimBLEUUID(NOTIFY_CHAR));
+  // 标准角色优先：FFE1 通知、FFE2 写入；若固件交换属性，再按 capability 自动寻找。
+  NimBLERemoteCharacteristic* ffe1=s->getCharacteristic(NimBLEUUID(JK_NOTIFY_UUID));
+  NimBLERemoteCharacteristic* ffe2=s->getCharacteristic(NimBLEUUID(JK_WRITE_UUID));
 
   writeCh_=nullptr;
   notifyCh_=nullptr;
+  if(ffe2 && (ffe2->canWriteNoResponse() || ffe2->canWrite())) writeCh_=ffe2;
+  if(ffe1 && (ffe1->canNotify() || ffe1->canIndicate())) notifyCh_=ffe1;
 
   NimBLERemoteCharacteristic* chars[2]={ffe1,ffe2};
   for(int i=0;i<2;i++){
@@ -237,7 +243,7 @@ bool BmsBle::connectDeviceByIndex(uint8_t index){
     if(!notifyCh_ && (c->canNotify() || c->canIndicate())) notifyCh_=c;
   }
 
-  Serial.printf("JK BLE chars: FFE1 write=%d notify=%d; FFE2 write=%d notify=%d\n",
+  Serial.printf("JK BLE chars: FFE1 W=%d N=%d; FFE2 W=%d N=%d\n",
                 ffe1 ? (int)(ffe1->canWriteNoResponse() || ffe1->canWrite()) : 0,
                 ffe1 ? (int)(ffe1->canNotify() || ffe1->canIndicate()) : 0,
                 ffe2 ? (int)(ffe2->canWriteNoResponse() || ffe2->canWrite()) : 0,
@@ -262,6 +268,8 @@ bool BmsBle::connectDeviceByIndex(uint8_t index){
   }
 
   ch_=writeCh_;
+  g_rxLen=0;
+  g_legacyAckSeen=false;
   bool subscribed=false;
   if(notifyCh_->canNotify()) subscribed=notifyCh_->subscribe(true,notifyCallback);
   else if(notifyCh_->canIndicate()) subscribed=notifyCh_->subscribe(false,notifyCallback);
@@ -301,59 +309,77 @@ void BmsBle::notifyCallback(NimBLERemoteCharacteristic*,uint8_t* d,size_t n,bool
   if(instance_) instance_->handleNotification(d,n);
 }
 
-// [流程4] BLE通知入口。这里解决“半帧/多帧/粘包”，再交给协议管理器。\nvoid BmsBle::handleNotification(const uint8_t* d,size_t n){
+// [流程4] BLE通知入口：只负责组帧/拆帧，不解析协议字段。
+// 兼容：半帧、粘包、噪声、FC xx 06 短ACK；完整帧再交给 BmsProtocolManager。
+void BmsBle::handleNotification(const uint8_t* d,size_t n){
+  if(!d || n==0) return;
   Serial.printf("BMS RX notify len=%u: ",(unsigned)n);
   size_t dump=n<24?n:24;
   for(size_t i=0;i<dump;i++) Serial.printf("%02X ",d[i]);
   if(n>dump) Serial.print("...");
   Serial.println();
 
-  static uint8_t rx[700];
-  static size_t len=0;
-  if(n>sizeof(rx) || len+n>sizeof(rx)){len=0;return;}
-  memcpy(rx+len,d,n);
-  len+=n;
+  if(n>sizeof(g_rxBuf) || g_rxLen+n>sizeof(g_rxBuf)){
+    Serial.println("BMS RX: buffer overflow, reset");
+    g_rxLen=0;
+    return;
+  }
+  memcpy(g_rxBuf+g_rxLen,d,n);
+  g_rxLen+=n;
 
-  while(len>=5){
-    // 协议管理器负责寻找帧头，BLE 层不再写死 JK 的 55 AA EB 90。
-    int start=protocolManager_.findFrameStart(rx,len);
-    if(start<0){
-      // 保留最后 3 字节，防止下一次 Notify 才收到跨包帧头。
-      if(len>3){
-        memmove(rx,rx+len-3,3);
-        len=3;
+  while(g_rxLen>=3){
+    bool ackFound=false;
+    for(size_t i=0;i+2<g_rxLen;){
+      if(g_rxBuf[i]==0xFC && g_rxBuf[i+2]==0x06){
+        Serial.printf("BMS RX: legacy ACK FC %02X 06\n",g_rxBuf[i+1]);
+        g_legacyAckSeen=true;
+        ackFound=true;
+        memmove(g_rxBuf+i,g_rxBuf+i+3,g_rxLen-(i+3));
+        g_rxLen-=3;
+        continue;
+      }
+      ++i;
+    }
+
+    if(g_rxLen<4){
+      if(ackFound) lastRequest_=0;
+      break;
+    }
+
+    int startIdx=protocolManager_.findFrameStart(g_rxBuf,g_rxLen);
+    if(startIdx<0){
+      if(g_rxLen>3){
+        memmove(g_rxBuf,g_rxBuf+g_rxLen-3,3);
+        g_rxLen=3;
       }
       break;
     }
 
-    if(start>0){
-      memmove(rx,rx+start,len-start);
-      len-=start;
-      if(len<4) break;
+    if(startIdx>0){
+      memmove(g_rxBuf,g_rxBuf+startIdx,g_rxLen-startIdx);
+      g_rxLen-=startIdx;
+      if(g_rxLen<4) break;
     }
 
-    // JK 4E57 是变长帧：长度字段位于 byte[2..3]。
-    // 旧 JK 55AAEB90 / 其他固定协议继续按固定长度处理。
-    size_t expected=protocolManager_.frameLength(rx,len);
-    if(expected==0){
-      // 已经找到帧头，但长度字段还不完整或异常，等待下一次 Notify。
+    size_t expected=protocolManager_.frameLength(g_rxBuf,g_rxLen);
+    if(expected==0) break;
+    if(expected>sizeof(g_rxBuf)){
+      Serial.printf("BMS RX: invalid frame length=%u, reset\n",(unsigned)expected);
+      g_rxLen=0;
       break;
     }
+    if(g_rxLen<expected) break;
 
-    if(expected>sizeof(rx)){
-      Serial.printf("BMS RX: frame too large (%u), reset\\n",(unsigned)expected);
-      len=0;
-      break;
+    if(protocolManager_.parseFrame(g_rxBuf,expected,g_bmsData)){
+      g_bmsData.online=true;
+      g_bmsData.updateMs=millis();
+      lastRequest_=millis();
     }
 
-    if(len>=expected){
-      if(protocolManager_.parseFrame(rx,expected,g_bmsData)) g_bmsData.online=true;
-      memmove(rx,rx+expected,len-expected);
-      len-=expected;
-      continue;
-    }
-    break;
+    memmove(g_rxBuf,g_rxBuf+expected,g_rxLen-expected);
+    g_rxLen-=expected;
   }
+  if(g_legacyAckSeen && g_rxLen==0) lastRequest_=0;
 }
 
 void BmsBle::requestAntStatus(){
@@ -404,11 +430,11 @@ void BmsBle::request(uint8_t cmd){
     return;
   }
 
-  if(String(protocolManager_.protocolName())=="TT"){
-    if(millis()-lastRequest_>=250){
-      request(0x03);
-      lastRequest_=millis();
-    }
+  String proto=String(protocolManager_.protocolName());
+  if(proto=="TT"){
+    if(millis()-lastRequest_>=250){ request(0x03); lastRequest_=millis(); }
+  } else if(proto=="ANT"){
+    if(millis()-lastRequest_>=2000){ requestAntStatus(); lastRequest_=millis(); }
   } else {
     uint32_t requestInterval=g_bmsData.valid?5000UL:1500UL;
     if(millis()-lastRequest_>requestInterval){ request(0x96); requestAntStatus(); requestTtProbe(); lastRequest_=millis(); }
@@ -431,6 +457,8 @@ bool BmsBle::connected() const{
   notifyCh_=nullptr;
   g_bmsData.online=false;
   g_bmsData.valid=false;
+  g_rxLen=0;
+  g_legacyAckSeen=false;
 
   NimBLEScan* s=NimBLEDevice::getScan();
   if(s){
