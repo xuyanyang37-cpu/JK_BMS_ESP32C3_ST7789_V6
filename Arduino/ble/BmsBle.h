@@ -43,6 +43,7 @@ private:
   NimBLERemoteCharacteristic* notifyCh_;
   BmsProtocolManager protocolManager_;
   uint8_t counter_;
+  uint8_t ttPollCounter_;
   uint32_t lastRequest_;
   uint32_t lastReconnectAttempt_;
   uint8_t scanCount_;
