@@ -64,9 +64,9 @@ void setup(){
   display.update(g_bmsData);
   delay(100);
 
-  Serial.printf("BOOT: saved JK MAC = %s\\n",savedMac.c_str());
+  Serial.printf("BOOT: saved JK MAC = %s type=%u\\n",savedMac.c_str(),bmsBle.getConfiguredAddressType());
 
-  bool connectedOk=bmsBle.connectByAddress(savedMac);
+  bool connectedOk=bmsBle.connectByAddress(savedMac,bmsBle.getConfiguredAddressType());
 
   // GATT 连接建立后，还必须收到有效 JK 数据，才算真正成功。
   if(connectedOk && bmsBle.connected()){
