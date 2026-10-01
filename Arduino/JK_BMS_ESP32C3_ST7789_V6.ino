@@ -1,6 +1,7 @@
 // JK_BMS_ESP32C3_ST7789_V6 - Arduino IDE 入口
 // 主项目源码保持在 src/，本文件放在 Arduino/ 文件夹中。
 // JK 协议移植参考：JkBmsBle_ESPHome_Reference.h（用户提供）。
+// JK_BMS_TO_WEB-ESP32 协议参考：Arduino/JK_BMS_TO_WEB_Protocol_Reference.h
 // 直接使用 Arduino IDE 打开本 .ino 即可加载 V6 源码。
 
 #include "../src/protocol/jk/Jk02_24S.cpp"
