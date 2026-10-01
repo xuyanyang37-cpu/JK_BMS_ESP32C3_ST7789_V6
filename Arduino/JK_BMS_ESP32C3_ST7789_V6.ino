@@ -8,6 +8,7 @@
 #include "../src/protocol/ant/AntProtocol.cpp"
 #include "../src/protocol/jbd/JbdProtocol.cpp"
 #include "../src/protocol/daly/DalyProtocol.cpp"
+#include "../src/protocol/tt/TtProtocol.cpp"
 #include "../src/protocol/BmsProtocolManager.cpp"
 #include "../src/ble/BmsBle.cpp"
 #include "../src/font/FontGB2312.cpp"
