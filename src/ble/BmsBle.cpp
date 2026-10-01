@@ -227,6 +227,9 @@ bool BmsBle::connectByAddress(const String& address,uint8_t addressType){
   request(0x96);
   delay(100);
   request(0x97);
+  // ANT-BMS 与 JK 共用常见 FFE0/FFE1 服务；同时发一次 ANT 状态请求，收到 7E A1 后自动切换解析器。
+  delay(100);
+  requestAntStatus();
   lastRequest_=millis();
   return true;
 }
@@ -277,6 +280,17 @@ void BmsBle::handleNotification(const uint8_t* d,size_t n){
   }
 }
 
+void BmsBle::requestAntStatus(){
+  if(!writeCh_ && !ch_) return;
+  NimBLERemoteCharacteristic* writer=writeCh_ ? writeCh_ : ch_;
+  uint8_t f[10]={0x7E,0xA1,0x01,0x00,0x00,0xBE,0x00,0x00,0xAA,0x55};
+  uint16_t crc=0xFFFF;
+  for(int i=1;i<=5;i++){ crc^=f[i]; for(uint8_t b=0;b<8;b++) crc=(crc&1)?(crc>>1)^0xA001:(crc>>1); }
+  f[6]=uint8_t(crc); f[7]=uint8_t(crc>>8);
+  if(writer->canWriteNoResponse()) writer->writeValue(f,10,false);
+  else if(writer->canWrite()) writer->writeValue(f,10,true);
+}
+
 void BmsBle::request(uint8_t cmd){
   if(!writeCh_ && !ch_) return;
   NimBLERemoteCharacteristic* writer=writeCh_ ? writeCh_ : ch_;
@@ -308,6 +322,7 @@ void BmsBle::loop(){
   uint32_t requestInterval=g_bmsData.valid?5000UL:1500UL;
   if(millis()-lastRequest_>requestInterval){
     request(0x96);
+    requestAntStatus();
     lastRequest_=millis();
   }
 }
