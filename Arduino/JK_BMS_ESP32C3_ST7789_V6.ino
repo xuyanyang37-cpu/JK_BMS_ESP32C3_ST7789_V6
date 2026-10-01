@@ -104,3 +104,153 @@ private:
 };
 
 // ===== 以下为各模块实现，后续提交继续追加 =====
+
+
+// ===== src/protocol/BmsProtocolManager.h =====
+class BmsProtocolManager {
+public:
+  BmsProtocolManager();
+  void begin(bool protocol32S);
+  void setProtocol32S(bool enable);
+  bool isProtocol32S() const;
+  bool parseFrame(const uint8_t*,size_t,BmsData&);
+  bool buildCommand(uint8_t,uint8_t,uint8_t[20]);
+  int findFrameStart(const uint8_t*,size_t);
+  size_t expectedFrameLength() const;
+  const char* protocolName() const;
+private:
+  JkProtocol jkProtocol_;
+  AntProtocol antProtocol_;
+  JbdProtocol jbdProtocol_;
+  DalyProtocol dalyProtocol_;
+  TtProtocol ttProtocol_;
+  BmsProtocol* activeProtocol_;
+  BmsProtocol* detectProtocol(const uint8_t*,size_t);
+};
+
+
+// ===== src/protocol/ant/AntProtocol.h =====
+class AntProtocol : public BmsProtocol {
+public:
+  const char* name() const override { return "ANT"; }
+  bool canHandle(const uint8_t*,size_t) const override;
+  int findFrameStart(const uint8_t*,size_t) const override;
+  bool parseFrame(const uint8_t*,size_t,BmsData&) override;
+  bool buildCommand(uint8_t,uint8_t,uint8_t[20]) override;
+  size_t expectedFrameLength() const override { return frameLength_; }
+private:
+  mutable size_t frameLength_=0;
+  static uint16_t crc16(const uint8_t*,size_t);
+  static uint16_t u16le(const uint8_t*);
+  static uint32_t u32le(const uint8_t*);
+  static int16_t s16le(const uint8_t*);
+  static bool validFrame(const uint8_t*,size_t);
+};
+
+
+// ===== src/protocol/jbd/JbdProtocol.h =====
+class JbdProtocol : public BmsProtocol {
+public:
+  const char* name() const override{return "JBD";}
+  bool canHandle(const uint8_t*,size_t) const override{return false;}
+  int findFrameStart(const uint8_t*,size_t) const override{return -1;}
+  bool parseFrame(const uint8_t*,size_t,BmsData&) override{return false;}
+  bool buildCommand(uint8_t,uint8_t,uint8_t[20]) override{return false;}
+  size_t expectedFrameLength() const override{return 0;}
+};
+
+
+// ===== src/protocol/daly/DalyProtocol.h =====
+class DalyProtocol : public BmsProtocol {
+public:
+ const char* name() const override{return "DALY";}
+ bool canHandle(const uint8_t*,size_t) const override{return false;}
+ int findFrameStart(const uint8_t*,size_t) const override{return -1;}
+ bool parseFrame(const uint8_t*,size_t,BmsData&) override{return false;}
+ bool buildCommand(uint8_t,uint8_t,uint8_t[20]) override{return false;}
+ size_t expectedFrameLength() const override{return 0;}
+};
+
+
+// ===== src/protocol/tt/TtProtocol.h =====
+class TtProtocol : public BmsProtocol {
+public:
+  const char* name() const override { return "TT"; }
+  bool canHandle(const uint8_t*,size_t) const override;
+  int findFrameStart(const uint8_t*,size_t) const override;
+  bool parseFrame(const uint8_t*,size_t,BmsData&) override;
+  bool buildCommand(uint8_t,uint8_t,uint8_t[20]) override;
+  size_t expectedFrameLength() const override { return expectedLen_; }
+  size_t commandLength(uint8_t cmd) const;
+private:
+  mutable size_t expectedLen_=63;
+  static uint16_t crc16(const uint8_t*,size_t);
+  static uint16_t be16(const uint8_t*);
+  static uint32_t be32(const uint8_t*);
+  static int16_t decodeCurrent(uint16_t);
+  static int decodeTemp(uint16_t);
+  static uint16_t efSum(const uint8_t*,size_t);
+  bool parseModbus(const uint8_t*,size_t,BmsData&);
+  bool parseEf(const uint8_t*,size_t,BmsData&);
+};
+
+
+// ===== src/ble/BmsBle.h =====
+struct BmsScanItem {
+  String address;
+  uint8_t addressType=BLE_ADDR_PUBLIC;
+  String name;
+  int rssi=0;
+};
+
+class BmsBle {
+public:
+  BmsBle();
+  bool begin();
+  bool scanAndConnect(uint32_t seconds=5, uint8_t attemptOverride=0);
+  bool connectByAddress(const String& address, uint8_t addressType=BLE_ADDR_PUBLIC);
+  uint8_t scanDevices(uint32_t seconds=5);
+  bool connectDeviceByIndex(uint8_t index);
+  bool connected() const;
+  void releaseConnectionForHotspot();
+  void loop();
+
+  uint8_t getScanCount() const { return scanCount_; }
+  const BmsScanItem& getScanItem(uint8_t i) const { return scanItems_[i]; }
+  const String& getConfiguredAddress() const { return configuredAddress_; }
+  uint8_t getConfiguredAddressType() const { return configuredAddressType_; }
+  void setConfiguredAddress(const String& mac, uint8_t addressType=BLE_ADDR_PUBLIC);
+  uint8_t getScanAttempt() const { return scanAttempt_; }
+  void setProtocol32S(bool enable){ protocol32S_=enable; protocolManager_.setProtocol32S(enable); }
+  bool isProtocol32S() const { return protocol32S_; }
+  const char* protocolName() const { return protocolManager_.protocolName(); }
+
+private:
+  NimBLEClient* client_;
+  NimBLERemoteCharacteristic* ch_;
+  NimBLERemoteCharacteristic* writeCh_;
+  NimBLERemoteCharacteristic* notifyCh_;
+  BmsProtocolManager protocolManager_;
+  uint8_t counter_;
+  uint32_t lastRequest_;
+  uint32_t lastReconnectAttempt_;
+  uint8_t scanCount_;
+  uint8_t scanAttempt_;
+  uint8_t configuredAddressType_;
+  bool protocol32S_;
+  String configuredAddress_;
+  BmsScanItem scanItems_[BMS_SCAN_RESULT_MAX];
+
+  static BmsBle* instance_;
+  static void notifyCallback(NimBLERemoteCharacteristic*,uint8_t*,size_t,bool);
+  void handleNotification(const uint8_t*,size_t);
+  void request(uint8_t);
+  void requestAntStatus();
+  void requestTtProbe();
+  bool isCandidate(const NimBLEAdvertisedDevice*) const;
+  void setStatus(BmsBootState state,const String& message);
+};
+
+// 保留旧名称兼容旧代码，不影响新的模块化命名。
+using JkBle = BmsBle;
+using JkScanItem = BmsScanItem;
