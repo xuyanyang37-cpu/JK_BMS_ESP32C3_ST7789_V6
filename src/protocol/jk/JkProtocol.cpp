@@ -228,7 +228,7 @@ bool JkProtocol::parseNewTlvFrame(const uint8_t* p, size_t n, BmsData& o) {
         break;
 
       case 0x87:
-        d.errors = u32be(cur); // keep the raw 32-bit counter field available
+        d.cycleCount = u32be(cur);
         break;
 
       case 0x88:
