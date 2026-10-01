@@ -63,6 +63,7 @@ input,select{padding:11px;margin:5px 0;width:100%;border-radius:8px;border:1px s
 <div>
 <button onclick="scan()">扫描蓝牙电池</button>
 <button onclick="save()">保存参数</button>
+<button onclick="location.href='/protection'">保护板设置</button>
 </div>
 <div id="list"></div>
 
@@ -156,7 +157,9 @@ String WebConfig::makeStatusJson(){
   j+=",\"message\":\""+jsonEscape(g_bmsData.statusMessage)+"\"";
   j+=",\"mac\":\""+jsonEscape(g_bmsData.mac.length()?g_bmsData.mac:ble_?ble_->getConfiguredAddress():"")+"\"";
   j+=",\"name\":\""+jsonEscape(g_bmsData.deviceName)+"\"";
-  j+=",\"proto\":"+String(ble_ && ble_->isProtocol32S()?"32":"24");
+  j+=",\"proto\":\""+jsonEscape(ble_?ble_->getPreferredProtocol():"NONE")+"\"";
+  j+=",\"jkModel\":"+String(ble_ && ble_->isProtocol32S()?"32":"24");
+  j+=",\"protoName\":\""+jsonEscape(ble_?ble_->getPreferredProtocol():"NONE")+"\"";
   j+=",\"ip\":\""+jsonEscape(WiFi.softAPIP().toString())+"\"";
   j+=",\"scanCount\":"+String(ble_?ble_->getScanCount():0);
   j+=",\"scanAttempt\":"+String(g_bmsData.scanAttempt);
@@ -188,10 +191,14 @@ String WebConfig::makeStatusJson(){
     g_bmsData.energyConsumptionWhKm=100.0f;
 
   server_.on("/",HTTP_GET,[this](){handleRoot();});
+  server_.on("/protection",HTTP_GET,[this](){handleProtection();});
   server_.on("/api/status",HTTP_GET,[this](){handleStatus();});
   server_.on("/api/scan",HTTP_GET,[this](){handleScan();});
   server_.on("/api/connect",HTTP_GET,[this](){handleConnect();});
   server_.on("/api/save",HTTP_POST,[this](){handleSave();});
+  server_.on("/api/protection/save",HTTP_POST,[this](){handleProtectionSave();});
+  server_.on("/api/protection/clear",HTTP_POST,[this](){handleProtectionClear();});
+  server_.on("/api/restart",HTTP_POST,[this](){handleRestart();});
   server_.onNotFound([this](){handleNotFound();});
   server_.begin();
 }
