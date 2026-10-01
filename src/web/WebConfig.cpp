@@ -334,6 +334,43 @@ load();setInterval(load,2000);
                ",\"mac\":\""+jsonEscape(mac)+"\"}");
 }
 
+// [接口] 保存保护板手动选择。
+void WebConfig::handleProtectionSave(){
+  if(!ble_){
+    server_.send(500,"application/json; charset=utf-8",R"({"message":"BLE未初始化"})");
+    return;
+  }
+  String name=server_.hasArg("protocol")?server_.arg("protocol"):"";
+  name.trim();
+  name.toUpperCase();
+  if(name!="JK" && name!="ANT" && name!="JBD" && name!="DALY" && name!="TT"){
+    server_.send(400,"application/json; charset=utf-8",R"({"message":"协议类型无效"})");
+    return;
+  }
+  ble_->setPreferredProtocol(name);
+  String j=R"({"message":"保护板协议已保存","protocol":")";
+  j+=jsonEscape(ble_->getPreferredProtocol());
+  j+="\"}";
+  server_.send(200,"application/json; charset=utf-8",j);
+}
+
+// [接口] 清除保存的协议，但保留蓝牙 MAC。
+void WebConfig::handleProtectionClear(){
+  Preferences p;
+  p.begin("jkcfg",false);
+  p.remove("protocol");
+  p.end();
+  if(ble_) ble_->setPreferredProtocol("JK");
+  server_.send(200,"application/json; charset=utf-8",R"({"message":"已清除保存协议"})");
+}
+
+// [接口] 网页重启 ESP32，不删除 Preferences。
+void WebConfig::handleRestart(){
+  server_.send(200,"application/json; charset=utf-8",R"({"message":"ESP32即将重启"})");
+  delay(300);
+  ESP.restart();
+}
+
 void WebConfig::handleNotFound(){
   server_.send(404,"text/plain; charset=utf-8","404");
 }
