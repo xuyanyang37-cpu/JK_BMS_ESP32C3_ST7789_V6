@@ -8,6 +8,7 @@ BmsProtocol* BmsProtocolManager::detectProtocol(const uint8_t*d,size_t n){
   if(antProtocol_.canHandle(d,n)) return &antProtocol_;
   if(jbdProtocol_.canHandle(d,n)) return &jbdProtocol_;
   if(dalyProtocol_.canHandle(d,n)) return &dalyProtocol_;
+  if(ttProtocol_.canHandle(d,n)) return &ttProtocol_;
   return nullptr;
 }
 bool BmsProtocolManager::parseFrame(const uint8_t*d,size_t n,BmsData&o){
@@ -19,7 +20,7 @@ bool BmsProtocolManager::buildCommand(uint8_t c,uint8_t n,uint8_t out[20]){
   return activeProtocol_->buildCommand(c,n,out);
 }
 int BmsProtocolManager::findFrameStart(const uint8_t*d,size_t n){
-  int best=-1; BmsProtocol* list[]={&jkProtocol_,&antProtocol_,&jbdProtocol_,&dalyProtocol_};
+  int best=-1; BmsProtocol* list[]={&jkProtocol_,&antProtocol_,&jbdProtocol_,&dalyProtocol_,&ttProtocol_};
   for(size_t i=0;i<sizeof(list)/sizeof(list[0]);i++){
     int s=list[i]->findFrameStart(d,n);
     if(s>=0&&(best<0||s<best)){ best=s; activeProtocol_=list[i]; }
