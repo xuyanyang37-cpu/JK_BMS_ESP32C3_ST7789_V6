@@ -1,3 +1,19 @@
+/*
+ * ================================================================
+ * WebConfig.cpp - 热点网页配置层
+ *
+ * 只有进入 BOOT_HOTSPOT 后，main.cpp 才会调用 begin()。
+ *
+ * 页面请求流程：
+ *   手机 -> 192.168.4.1
+ *        -> WebServer
+ *        -> handleXxx()
+ *        -> BmsBle / Preferences / g_bmsData
+ *
+ * 本文件不解析原始BMS帧。
+ * ================================================================
+ */
+
 #include "WebConfig.h"
 #include <WiFi.h>
 #include <Preferences.h>
@@ -155,7 +171,7 @@ String WebConfig::makeStatusJson(){
   return j+"}";
 }
 
-void WebConfig::begin(BmsBle* ble){
+// [网页流程1] 启动WebServer并注册所有HTTP接口。\nvoid WebConfig::begin(BmsBle* ble){
   // 只初始化一次。热点模式下不要重复注册 WebServer 路由，
   // 否则会不断创建回调对象并造成堆碎片。
   if(active_) return;
@@ -180,7 +196,7 @@ void WebConfig::begin(BmsBle* ble){
   server_.begin();
 }
 
-void WebConfig::loop(){
+// [网页流程2] 每次主循环处理一次HTTP请求。\nvoid WebConfig::loop(){
   if(active_) server_.handleClient();
 }
 
@@ -189,11 +205,11 @@ void WebConfig::handleRoot(){
   server_.send_P(200,"text/html; charset=utf-8",WEB_PAGE);
 }
 
-void WebConfig::handleStatus(){
+// [接口] 返回当前BMS状态，前端定时刷新。\nvoid WebConfig::handleStatus(){
   server_.send(200,"application/json; charset=utf-8",makeStatusJson());
 }
 
-void WebConfig::handleScan(){
+// [接口] 网页手动扫描BLE设备。\nvoid WebConfig::handleScan(){
   if(!ble_){
     server_.send(500,"application/json","{\"message\":\"BLE未初始化\",\"items\":[]}");
     return;
@@ -210,7 +226,7 @@ void WebConfig::handleScan(){
   server_.send(200,"application/json; charset=utf-8",j);
 }
 
-void WebConfig::handleConnect(){
+// [接口] 网页选择扫描结果后按index连接。\nvoid WebConfig::handleConnect(){
   if(!ble_){
     server_.send(500,"application/json","{\"message\":\"BLE未初始化\"}");
     return;
@@ -239,7 +255,7 @@ void WebConfig::handleConnect(){
   server_.send(ok?200:500,"application/json; charset=utf-8",j);
 }
 
-void WebConfig::handleSave(){
+// [接口] 保存MAC、24S/32S和Wh/km到Preferences。\nvoid WebConfig::handleSave(){
   if(!ble_){
     server_.send(500,"application/json","{\"message\":\"BLE未初始化\"}");
     return;
