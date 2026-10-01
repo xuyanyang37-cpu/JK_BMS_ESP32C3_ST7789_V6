@@ -36,6 +36,7 @@ private:
   int detectOffset(const uint8_t*, size_t) const;
   bool parseOldFrame(const uint8_t*, size_t, BmsData&);
   bool parseNewTlvFrame(const uint8_t*, size_t, BmsData&);
+  bool parseLegacyRs485Frame(const uint8_t*, size_t, BmsData&);
 };
 
 #endif
