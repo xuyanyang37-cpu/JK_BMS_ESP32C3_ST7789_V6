@@ -12,5 +12,13 @@ public:
   virtual bool parseFrame(const uint8_t*,size_t,BmsData&)=0;
   virtual bool buildCommand(uint8_t,uint8_t,uint8_t[20])=0;
   virtual size_t expectedFrameLength() const=0;
+
+  // 返回当前缓冲区中完整帧所需的字节数。
+  // 固定长度协议直接返回 expectedFrameLength()；
+  // 变长协议（例如 JK 4E57）根据帧头长度字段计算。
+  virtual size_t frameLength(const uint8_t* p,size_t n) const {
+    (void)p; (void)n;
+    return expectedFrameLength();
+  }
 };
 #endif
