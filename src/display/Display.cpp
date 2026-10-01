@@ -478,7 +478,7 @@ void Display::drawTemperature(const BmsData& d) {
   leftInfoSprite_.drawCentreString(cap, 119, 9, 2);
   leftInfoSprite_.drawCentreString(cap, 120, 9, 2);
 
-  leftInfoSprite_.pushSprite(4, 117);
+  leftInfoSprite_.pushSprite(4, 118);
 }
 
 void Display::drawVoltage(const BmsData& d) {
