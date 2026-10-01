@@ -7,6 +7,7 @@
 #include "ant/AntProtocol.h"
 #include "jbd/JbdProtocol.h"
 #include "daly/DalyProtocol.h"
+#include "tt/TtProtocol.h"
 class BmsProtocolManager {
 public:
   BmsProtocolManager();
@@ -23,6 +24,7 @@ private:
   AntProtocol antProtocol_;
   JbdProtocol jbdProtocol_;
   DalyProtocol dalyProtocol_;
+  TtProtocol ttProtocol_;
   BmsProtocol* activeProtocol_;
   BmsProtocol* detectProtocol(const uint8_t*,size_t);
 };
