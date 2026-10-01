@@ -56,11 +56,13 @@ BmsBle::BmsBle()
   configuredAddressType_=p.getUChar("mactype", BLE_ADDR_PUBLIC);
   protocol32S_=p.getBool("32s", true);
   g_bmsData.energyConsumptionWhKm=p.getFloat("whkm", 100.0f);
+  String preferredProtocol=p.getString("protocol", "JK");
   if(g_bmsData.energyConsumptionWhKm<1.0f || g_bmsData.energyConsumptionWhKm>1000.0f)
     g_bmsData.energyConsumptionWhKm=100.0f;
   p.end();
 
   protocolManager_.begin(protocol32S_);
+  if(preferredProtocol.length()) protocolManager_.setPreferredProtocol(preferredProtocol);
 
   // 预留固定容量，避免三轮扫描时反复扩容 String，
   // 减少 ESP32-C3 堆碎片，为最后启动 SoftAP 留出连续内存。
@@ -70,6 +72,19 @@ BmsBle::BmsBle()
   }
 
   return true;
+}
+
+void BmsBle::setPreferredProtocol(const String& name){
+  if(protocolManager_.setPreferredProtocol(name)){
+    Preferences p;
+    p.begin("jkcfg",false);
+    p.putString("protocol",protocolManager_.preferredProtocolName());
+    p.end();
+  }
+}
+
+String BmsBle::getPreferredProtocol() const {
+  return String(protocolManager_.preferredProtocolName());
 }
 
 void BmsBle::setConfiguredAddress(const String& mac, uint8_t addressType){
