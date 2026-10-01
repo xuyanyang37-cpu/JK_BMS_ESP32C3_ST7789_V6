@@ -15,6 +15,8 @@ public:
   void begin(bool protocol32S);
   void setProtocol32S(bool enable);
   bool isProtocol32S() const;
+  bool setPreferredProtocol(const String& name);
+  const char* preferredProtocolName() const;
   bool parseFrame(const uint8_t*,size_t,BmsData&);
   bool buildCommand(uint8_t,uint8_t,uint8_t[20]) ;
   int findFrameStart(const uint8_t*,size_t);
