@@ -20,22 +20,22 @@ static void startHotspot(){
   // 三次 BLE 扫描后进入配网时，先关闭 WiFi 驱动的旧状态，
   // 再只启动 SoftAP，避免 BLE + WiFi 切换时保留无用的 STA 资源。
   if(g_bmsData.hotspot){
-    Serial.printf("HOTSPOT: already active, skip duplicate begin, heap=%u\\n",ESP.getFreeHeap());
+    Serial.printf("HOTSPOT: already active, skip duplicate begin, heap=%u\n",ESP.getFreeHeap());
     return;
   }
 
-  Serial.printf("HOTSPOT: before WiFi AP heap=%u\\n",ESP.getFreeHeap());
+  Serial.printf("HOTSPOT: before WiFi AP heap=%u\n",ESP.getFreeHeap());
   WiFi.mode(WIFI_OFF);
   delay(80);
   WiFi.mode(WIFI_AP);
-  WiFi.softAP(AP_SSID,AP_PASSWORD);
+  WiFi.softAP(AP_SSID,AP_PASSWORD,1,false,1);
   IPAddress ip=WiFi.softAPIP();
   g_bmsData.hotspot=true;
   g_bmsData.hotspotIp=ip.toString();
   g_bmsData.bootState=BOOT_HOTSPOT;
   g_bmsData.statusMessage="等待网页设置";
   webConfig.begin(&bmsBle);
-  Serial.printf("HOTSPOT: %s %s heap=%u\\n",AP_SSID,ip.toString().c_str(),ESP.getFreeHeap());
+  Serial.printf("HOTSPOT: %s %s heap=%u\n",AP_SSID,ip.toString().c_str(),ESP.getFreeHeap());
 }
 
 void setup(){
@@ -44,7 +44,7 @@ void setup(){
 
   esp_reset_reason_t resetReason=esp_reset_reason();
   Serial.println();
-  Serial.printf("ESP32 reset reason: %d\\n",(int)resetReason);
+  Serial.printf("ESP32 reset reason: %d\n",(int)resetReason);
 
   pinMode(TFT_BL,OUTPUT);
   digitalWrite(TFT_BL,LOW);
@@ -73,7 +73,7 @@ void setup(){
     g_bmsData.statusMessage="扫描蓝牙电池 "+String(attempt)+"/3";
     display.update(g_bmsData);
 
-    Serial.printf("BOOT: V2 scan attempt %u/3\\n",attempt);
+    Serial.printf("BOOT: V2 scan attempt %u/3\n",attempt);
 
     if(bmsBle.scanAndConnect(3,attempt)){
       // GATT 已连接后，必须收到有效 JK 数据才算真正成功。
@@ -122,9 +122,9 @@ void setup(){
   display.update(g_bmsData);
   delay(100);
 
-  Serial.printf("BOOT: 3 scan attempts failed, before hotspot heap=%u\\n",ESP.getFreeHeap());
+  Serial.printf("BOOT: 3 scan attempts failed, before hotspot heap=%u\n",ESP.getFreeHeap());
   startHotspot();
-  Serial.printf("BOOT: hotspot ready heap=%u\\n",ESP.getFreeHeap());
+  Serial.printf("BOOT: hotspot ready heap=%u\n",ESP.getFreeHeap());
   display.update(g_bmsData);
 }
 
