@@ -925,3 +925,957 @@ void BmsBle::releaseConnectionForHotspot(){
     s->clearResults();
   }
 }
+
+
+// ===== src/font/FontGB2312.cpp =====
+namespace FontGB2312 {
+void drawText(TFT_eSprite& s,int16_t x,int16_t y,const String& text,uint16_t fg,uint16_t bg,uint8_t font){
+  s.setTextColor(fg,bg);
+  s.drawString(text,x,y,font);
+}
+void drawCenterString(TFT_eSprite& s,int16_t x,int16_t y,const String& text,uint16_t fg,uint16_t bg,uint8_t font){
+  s.setTextColor(fg,bg);
+  s.drawCentreString(text,x,y,font);
+}
+}
+
+
+// ===== src/display/Display.cpp =====
+/*
+ * JK BMS + ST7789 1.9" / 320x170
+ * UI 2.0 - 按设计图重新做像素级布局。
+ *
+ * 主界面：
+ *   左：SOC
+ *   左下：温度 / 单体压差 + 剩余容量
+ *   右：电压 / 电流 / 功率 / 剩余里程
+ *   底：SOC 渐变条
+ *
+ * 主界面只显示电池运行数据，不显示连接状态文字。
+ */
+
+namespace {
+  // 设计图的深蓝色圆角卡片。
+  static const uint16_t UI_PANEL      = 0x0948;
+  static const uint16_t UI_PANEL_DARK = 0x0127;
+
+  static const uint16_t UI_WHITE   = TFT_WHITE;
+  static const uint16_t UI_VOLTAGE = 0xFFE0; // 明黄色
+  static const uint16_t UI_CURRENT = 0x07E0; // 亮绿色
+  static const uint16_t UI_POWER   = 0xFCA8; // 柔和红色
+  static const uint16_t UI_RANGE   = 0x2F3C; // 青色
+  static const uint16_t UI_TEMP    = 0x07E0;
+
+  // 设计图：低电量可调颜色阈值。
+  static const float SOC_WARN_THRESHOLD = 30.0f;
+  static const float SOC_CRITICAL_THRESHOLD = 15.0f;
+
+  // 16bit RGB565 颜色线性插值。
+  static uint16_t lerp565(uint16_t a, uint16_t b, uint16_t percent) {
+    if (percent > 100) percent = 100;
+
+    uint8_t ar = (a >> 11) & 0x1F;
+    uint8_t ag = (a >> 5)  & 0x3F;
+    uint8_t ab = a & 0x1F;
+
+    uint8_t br = (b >> 11) & 0x1F;
+    uint8_t bg = (b >> 5)  & 0x3F;
+    uint8_t bb = b & 0x1F;
+
+    uint8_t rr = ar + (((int16_t)br - (int16_t)ar) * percent) / 100;
+    uint8_t rg = ag + (((int16_t)bg - (int16_t)ag) * percent) / 100;
+    uint8_t rb = ab + (((int16_t)bb - (int16_t)ab) * percent) / 100;
+
+    return ((uint16_t)rr << 11) | ((uint16_t)rg << 5) | rb;
+  }
+
+  static uint16_t socColor(float soc) {
+    if (soc <= SOC_CRITICAL_THRESHOLD) return TFT_RED;
+    if (soc <= SOC_WARN_THRESHOLD) return TFT_YELLOW;
+    return UI_WHITE;
+  }
+
+  static void drawPanel(TFT_eSprite& sprite,
+                        int16_t x, int16_t y,
+                        int16_t w, int16_t h) {
+    sprite.fillRoundRect(x, y, w, h, 7, UI_PANEL);
+  }
+
+  static void drawMetricRow(TFT_eSprite& sprite,
+                            char icon,
+                            const char* label,
+                            const String& value,
+                            uint16_t color) {
+    sprite.fillSprite(TFT_BLACK);
+    sprite.fillRoundRect(0, 0, 168, 27, 7, UI_PANEL);
+
+    sprite.drawCircle(15, 13, 11, color);
+    sprite.setTextColor(color, UI_PANEL);
+    sprite.drawCentreString(String(icon), 15, 5, 2);
+
+    FontGB2312::drawText(sprite, 31, 5,
+                         String(label), color, UI_PANEL, 1);
+
+    sprite.setTextColor(color, UI_PANEL);
+    sprite.drawRightString(value, 164, 5, 2);
+  }
+}
+
+bool Display::changed(float a, float b, float eps) const {
+  return fabsf(a - b) >= eps;
+}
+
+void Display::begin() {
+  // ST7789 初始化期间保持背光关闭，避免初始化过程中的白屏/闪屏。
+  pinMode(TFT_BL, OUTPUT);
+  digitalWrite(TFT_BL, LOW);
+
+  // 初始化 ST7789 控制器。
+  tft_.init();
+  tft_.setRotation(1);
+
+  // 控制器初始化完成后先清黑屏，再开启背光。
+  tft_.fillScreen(TFT_BLACK);
+  delay(30);
+  digitalWrite(TFT_BL, HIGH);
+
+  socSprite_.setColorDepth(16);
+  leftInfoSprite_.setColorDepth(16);
+  rowSprite_.setColorDepth(16);
+  barSprite_.setColorDepth(16);
+
+  socSprite_.createSprite(140, 78);
+  leftInfoSprite_.createSprite(140, 67);
+  rowSprite_.createSprite(168, 27);
+  barSprite_.createSprite(312, 11);
+
+  socSprite_.fillSprite(TFT_BLACK);
+  leftInfoSprite_.fillSprite(TFT_BLACK);
+  rowSprite_.fillSprite(TFT_BLACK);
+  barSprite_.fillSprite(TFT_BLACK);
+
+  initialized_ = true;
+  firstDashboard_ = true;
+  drawFullPage(g_bmsData);
+}
+
+void Display::update(const BmsData& d) {
+  if (!initialized_) return;
+
+  // 扫描阶段单独处理：
+  // 第一次进入扫描页才整页绘制，后续 1/3 -> 2/3 -> 3/3
+  // 只刷新进度条和次数，不再 fillScreen()/整页 pushSprite()。
+  if (d.bootState == BOOT_SCANNING || d.bootState == BOOT_START) {
+    bool force = !scanScreenInitialized_ || lastBootState_ != d.bootState;
+    drawScanningScreen(d, force);
+    scanScreenInitialized_ = true;
+    lastBootState_ = d.bootState;
+    lastData_ = d;
+    return;
+  }
+
+  // 离开扫描页时，允许下一次扫描重新初始化静态区域。
+  scanScreenInitialized_ = false;
+
+  if (d.bootState != lastBootState_ ||
+      d.hotspot != lastData_.hotspot) {
+    drawFullPage(d);
+    lastBootState_ = d.bootState;
+    lastData_ = d;
+    return;
+  }
+
+  if (d.bootState != BOOT_CONNECTED && !d.online) {
+    if (d.statusMessage != lastData_.statusMessage ||
+        d.scanAttempt != lastData_.scanAttempt ||
+        d.hotspotIp != lastData_.hotspotIp ||
+        d.mac != lastData_.mac) {
+      drawFullPage(d);
+      lastData_ = d;
+    }
+    return;
+  }
+
+  drawDashboard(d, firstDashboard_);
+  firstDashboard_ = false;
+  lastData_ = d;
+}
+
+void Display::drawScanningScreen(const BmsData& d, bool force) {
+  // 只在第一次进入扫描页时画固定内容。
+  if (force) {
+    tft_.fillScreen(TFT_BLACK);
+
+    // 扫描页文字统一绘制到 Sprite，不直接绘制到 tft_。
+    TFT_eSprite scanSprite(&tft_);
+    scanSprite.setColorDepth(16);
+
+    if (scanSprite.createSprite(320, 60)) {
+      scanSprite.fillSprite(TFT_BLACK);
+
+      FontGB2312::drawCenterString(scanSprite, 160, 7,
+                                   "连接电池",
+                                   TFT_CYAN, TFT_BLACK, 2);
+
+      FontGB2312::drawCenterString(scanSprite, 160, 43,
+                                   "扫描蓝牙电池",
+                                   TFT_WHITE, TFT_BLACK, 1);
+
+      scanSprite.pushSprite(0, 0);
+      scanSprite.deleteSprite();
+    }
+
+    // 进度条外框
+    tft_.drawRoundRect(35, 72, 250, 18, 5, TFT_DARKGREY);
+
+    // 底部文字也使用 Sprite，避免 tft_ 直接绘制中文。
+    TFT_eSprite bottomSprite(&tft_);
+    bottomSprite.setColorDepth(16);
+
+    if (bottomSprite.createSprite(320, 35)) {
+      bottomSprite.fillSprite(TFT_BLACK);
+
+      FontGB2312::drawCenterString(bottomSprite, 160, 5,
+                                   "自动扫描并连接JK保护板",
+                                   TFT_LIGHTGREY, TFT_BLACK, 1);
+
+      bottomSprite.pushSprite(0, 130);
+      bottomSprite.deleteSprite();
+    }
+  }
+
+  // 只刷新进度条内部区域，不碰其它区域。
+  TFT_eSprite scanSprite(&tft_);
+  scanSprite.setColorDepth(16);
+  scanSprite.createSprite(244, 12);
+  scanSprite.fillSprite(TFT_BLACK);
+
+  int progress = (d.scanAttempt * 100) / 3;
+  if (progress > 100) progress = 100;
+  if (progress < 0) progress = 0;
+
+  int filled = 238 * progress / 100;
+  if (filled > 0)
+    scanSprite.fillRoundRect(1, 1, filled, 10, 4, TFT_BLUE);
+
+  scanSprite.pushSprite(38, 75);
+  scanSprite.deleteSprite();
+
+  // 次数单独做一个很小的局部 Sprite。
+  TFT_eSprite countSprite(&tft_);
+  countSprite.setColorDepth(16);
+  countSprite.createSprite(80, 25);
+  countSprite.fillSprite(TFT_BLACK);
+  FontGB2312::drawCenterString(countSprite, 40, 2,
+                               String(d.scanAttempt) + "/3",
+                               TFT_YELLOW, TFT_BLACK, 1);
+  countSprite.pushSprite(120, 96);
+  countSprite.deleteSprite();
+}
+
+void Display::drawFullPage(const BmsData& d) {
+  tft_.fillScreen(TFT_BLACK);
+  firstDashboard_ = (d.online || d.bootState == BOOT_CONNECTED);
+
+  if (d.bootState == BOOT_SCANNING ||
+      d.bootState == BOOT_START) {
+    TFT_eSprite page(&tft_);
+    page.setColorDepth(16);
+    page.createSprite(320, 170);
+    page.fillSprite(TFT_BLACK);
+
+    FontGB2312::drawCenterString(page, 160, 7,
+                                 "连接电池",
+                                 TFT_CYAN, TFT_BLACK, 2);
+    FontGB2312::drawCenterString(
+        page, 160, 43,
+        d.statusMessage.length() ? d.statusMessage : "扫描蓝牙...",
+        TFT_WHITE, TFT_BLACK, 1);
+
+    int w = 250;
+    page.drawRoundRect(35, 72, w, 18, 5, TFT_DARKGREY);
+
+    int progress = (d.scanAttempt * 100) / 3;
+    if (progress > 100) progress = 100;
+
+    if (progress > 0) {
+      page.fillRoundRect(38, 75,
+                         (w - 6) * progress / 100,
+                         12, 4, TFT_BLUE);
+    }
+
+    FontGB2312::drawCenterString(page, 160, 96,
+                                 String(d.scanAttempt) + "/3",
+                                 TFT_YELLOW, TFT_BLACK, 1);
+    FontGB2312::drawCenterString(page, 160, 135,
+                                 "自动扫描并连接JK保护板",
+                                 TFT_LIGHTGREY, TFT_BLACK, 1);
+
+    page.pushSprite(0, 0);
+    page.deleteSprite();
+    return;
+  }
+
+  if (d.bootState == BOOT_CONNECTING) {
+    // 连接页也禁止 320x170 全屏 Sprite。
+    // BLE 连接阶段堆内存最紧张，此时申请约 109KB 连续 RAM 容易失败，
+    // 随后进入热点时又要启动 WiFi，可能表现为重启。
+    // 这里先直接清黑屏，再使用几个小 Sprite。
+    tft_.fillScreen(TFT_BLACK);
+
+    TFT_eSprite title(&tft_);
+    title.setColorDepth(16);
+    if(title.createSprite(320, 32)){
+      title.fillSprite(TFT_BLACK);
+      FontGB2312::drawCenterString(title, 160, 4,
+                                   "正在连接",
+                                   TFT_YELLOW, TFT_BLACK, 2);
+      title.pushSprite(0, 5);
+      title.deleteSprite();
+    }
+
+    TFT_eSprite mac(&tft_);
+    mac.setColorDepth(16);
+    if(mac.createSprite(320, 28)){
+      mac.fillSprite(TFT_BLACK);
+      FontGB2312::drawCenterString(mac, 160, 4,
+                                   d.mac.length() ? d.mac : "JK-BMS",
+                                   TFT_WHITE, TFT_BLACK, 1);
+      mac.pushSprite(0, 47);
+      mac.deleteSprite();
+    }
+
+    TFT_eSprite hint(&tft_);
+    hint.setColorDepth(16);
+    if(hint.createSprite(320, 28)){
+      hint.fillSprite(TFT_BLACK);
+      FontGB2312::drawCenterString(hint, 160, 4,
+                                   "正在建立蓝牙连接...",
+                                   TFT_WHITE, TFT_BLACK, 1);
+      hint.pushSprite(0, 82);
+      hint.deleteSprite();
+    }
+    return;
+  }
+
+  if ((d.bootState == BOOT_HOTSPOT || d.hotspot) &&
+      !d.online) {
+    // 热点页禁止申请 320x170 的全屏 Sprite。
+    // 320x170x16bit 约需要 109KB 连续 RAM；连续 BLE 扫描三次后，
+    // 堆内存可能已经碎片化，导致 createSprite() 失败，表现为
+    // “背光亮但屏幕没有界面”。
+    // 改为：背景直接清屏，中文/英文分别使用小尺寸局部 Sprite。
+    tft_.fillScreen(TFT_BLACK);
+
+    TFT_eSprite title(&tft_);
+    title.setColorDepth(16);
+    if(title.createSprite(320, 32)){
+      title.fillSprite(TFT_BLACK);
+      FontGB2312::drawCenterString(title, 160, 3,
+                                   "热点设置",
+                                   TFT_YELLOW, TFT_BLACK, 2);
+      title.pushSprite(0, 3);
+      title.deleteSprite();
+    }
+
+    TFT_eSprite wifi(&tft_);
+    wifi.setColorDepth(16);
+    if(wifi.createSprite(320, 28)){
+      wifi.fillSprite(TFT_BLACK);
+      FontGB2312::drawCenterString(wifi, 160, 3,
+                                   "WiFi: JK-BMS-SETUP",
+                                   TFT_WHITE, TFT_BLACK, 1);
+      wifi.pushSprite(0, 40);
+      wifi.deleteSprite();
+    }
+
+    TFT_eSprite hint(&tft_);
+    hint.setColorDepth(16);
+    if(hint.createSprite(320, 28)){
+      hint.fillSprite(TFT_BLACK);
+      FontGB2312::drawCenterString(hint, 160, 3,
+                                   "手机连接后打开网页",
+                                   TFT_CYAN, TFT_BLACK, 1);
+      hint.pushSprite(0, 69);
+      hint.deleteSprite();
+    }
+
+    TFT_eSprite ip(&tft_);
+    ip.setColorDepth(16);
+    if(ip.createSprite(320, 30)){
+      ip.fillSprite(TFT_BLACK);
+      FontGB2312::drawCenterString(
+          ip, 160, 3,
+          d.hotspotIp.length() ? d.hotspotIp : "192.168.4.1",
+          TFT_CYAN, TFT_BLACK, 2);
+      ip.pushSprite(0, 98);
+      ip.deleteSprite();
+    }
+
+    TFT_eSprite bottom(&tft_);
+    bottom.setColorDepth(16);
+    if(bottom.createSprite(320, 28)){
+      bottom.fillSprite(TFT_BLACK);
+      FontGB2312::drawCenterString(bottom, 160, 3,
+                                   "扫描 / 选择 / 连接电池",
+                                   TFT_LIGHTGREY, TFT_BLACK, 1);
+      bottom.pushSprite(0, 133);
+      bottom.deleteSprite();
+    }
+    return;
+  }
+
+  drawDashboard(d, true);
+}
+
+void Display::drawDashboard(const BmsData& d, bool force) {
+  if (force) {
+    tft_.fillScreen(TFT_BLACK);
+
+    drawSoc(d);
+    drawVoltage(d);
+    drawCurrent(d);
+    drawPower(d);
+    drawTemperature(d);
+    drawRange(d);
+    drawSocBar(d);
+    return;
+  }
+
+  if (changed(d.soc, lastData_.soc, 0.5f)) {
+    drawSoc(d);
+    drawSocBar(d);
+  }
+
+  if (changed(d.totalVoltage, lastData_.totalVoltage, 0.1f)) {
+    drawVoltage(d);
+  }
+
+  if (changed(d.current, lastData_.current, 0.1f)) {
+    drawCurrent(d);
+  }
+
+  if (changed(d.power, lastData_.power, 1.0f)) {
+    drawPower(d);
+  }
+
+  if (changed(d.remainingCapacityAh, lastData_.remainingCapacityAh, 0.1f) ||
+      changed(d.temperature1, lastData_.temperature1, 0.1f) ||
+      changed(d.deltaCellVoltage, lastData_.deltaCellVoltage, 0.001f)) {
+    drawTemperature(d);
+  }
+
+  if (changed(d.remainingRangeKm, lastData_.remainingRangeKm, 0.1f)) {
+    drawRange(d);
+  }
+}
+
+void Display::drawSoc(const BmsData& d) {
+  socSprite_.fillSprite(TFT_BLACK);
+  drawPanel(socSprite_, 0, 0, 140, 78);
+
+  String value = String(d.soc, 0);
+  uint16_t color = socColor(d.soc);
+
+  socSprite_.setTextColor(color, UI_PANEL);
+  socSprite_.drawCentreString(value, 70, -1, 7);
+
+  socSprite_.setTextColor(color, UI_PANEL);
+  socSprite_.drawString("%", 108, 47, 4);
+
+  socSprite_.pushSprite(4, 4);
+}
+
+void Display::drawTemperature(const BmsData& d) {
+  leftInfoSprite_.fillSprite(TFT_BLACK);
+  leftInfoSprite_.fillRoundRect(0, 0, 73, 67, 7, UI_PANEL);
+
+  String temp = String(d.temperature1, 1) + "C";
+  String delta = String(d.deltaCellVoltage * 1000.0f, 0) + "mV";
+
+  leftInfoSprite_.setTextColor(UI_TEMP, UI_PANEL);
+  leftInfoSprite_.drawString(temp, 4, 3, 2);
+  leftInfoSprite_.drawString(delta, 4, 31, 2);
+
+  leftInfoSprite_.fillRoundRect(75, 0, 65, 67, 7, UI_PANEL);
+
+  leftInfoSprite_.setTextColor(UI_WHITE, UI_PANEL);
+  leftInfoSprite_.drawCentreString("Ah", 107, 1, 2);
+
+  String cap = String(d.remainingCapacityAh, 1);
+  leftInfoSprite_.drawCentreString(cap, 107, 24, 4);
+
+  leftInfoSprite_.pushSprite(4, 84);
+}
+
+void Display::drawVoltage(const BmsData& d) {
+  drawMetricRow(rowSprite_, 'V', "电压",
+                String(d.totalVoltage, 2) + "V",
+                UI_VOLTAGE);
+  rowSprite_.pushSprite(148, 4);
+}
+
+void Display::drawCurrent(const BmsData& d) {
+  drawMetricRow(rowSprite_, 'A', "电流",
+                String(d.current, 1) + "A",
+                UI_CURRENT);
+  rowSprite_.pushSprite(148, 33);
+}
+
+void Display::drawPower(const BmsData& d) {
+  drawMetricRow(rowSprite_, 'W', "功率",
+                String(d.power, 0) + "W",
+                UI_POWER);
+  rowSprite_.pushSprite(148, 62);
+}
+
+void Display::drawRange(const BmsData& d) {
+  rowSprite_.fillSprite(TFT_BLACK);
+  rowSprite_.fillRoundRect(0, 0, 168, 27, 7, UI_PANEL);
+
+  FontGB2312::drawText(rowSprite_, 8, 5,
+                       "剩余里程",
+                       UI_RANGE, UI_PANEL, 1);
+
+  rowSprite_.setTextColor(UI_RANGE, UI_PANEL);
+  rowSprite_.drawRightString(
+      String(d.remainingRangeKm, 0) + " KM",
+      164, 5, 2);
+
+  rowSprite_.pushSprite(148, 91);
+}
+
+void Display::drawSocBar(const BmsData& d) {
+  barSprite_.fillSprite(TFT_BLACK);
+
+  float ratio = d.soc / 100.0f;
+  if (ratio < 0.0f) ratio = 0.0f;
+  if (ratio > 1.0f) ratio = 1.0f;
+
+  const int16_t w = 312;
+  const int16_t h = 11;
+  int filled = (int)(w * ratio + 0.5f);
+
+  for (int16_t x = 0; x < w; ++x) {
+    if (x >= filled) {
+      barSprite_.drawFastVLine(x, 0, h, UI_PANEL_DARK);
+      continue;
+    }
+
+    uint16_t color;
+
+    if (w <= 1) {
+      color = TFT_GREEN;
+    } else {
+      uint16_t p = (uint16_t)((x * 100L) / (w - 1));
+
+      if (p <= 50) {
+        color = lerp565(TFT_GREEN, TFT_YELLOW,
+                        (uint16_t)(p * 2));
+      } else {
+        color = lerp565(TFT_YELLOW, TFT_RED,
+                        (uint16_t)((p - 50) * 2));
+      }
+    }
+
+    barSprite_.drawFastVLine(x, 0, h, color);
+  }
+
+  barSprite_.drawRoundRect(0, 0, w, h, 3, TFT_DARKGREY);
+  barSprite_.pushSprite(4, 157);
+}
+
+
+// ===== src/web/WebConfig.cpp =====
+WebConfig::WebConfig():server_(80),ble_(nullptr),active_(false){}
+
+String WebConfig::jsonEscape(const String& s){
+  String o;
+  for(size_t i=0;i<s.length();i++){
+    char c=s[i];
+    if(c=='"') o+="\\\"";
+    else if(c=='\\') o+="\\\\";
+    else if(c=='\n') o+="\\n";
+    else if(c=='\r') o+="\\r";
+    else if(c=='\t') o+="\\t";
+    else o+=c;
+  }
+  return o;
+}
+
+String WebConfig::makeStatusJson(){
+  String j="{";
+  j+="\"online\":"+String(g_bmsData.online?"true":"false");
+  j+=",\"state\":"+String((int)g_bmsData.bootState);
+  j+=",\"message\":\""+jsonEscape(g_bmsData.statusMessage)+"\"";
+  j+=",\"mac\":\""+jsonEscape(g_bmsData.mac.length()?g_bmsData.mac:ble_?ble_->getConfiguredAddress():"")+"\"";
+  j+=",\"name\":\""+jsonEscape(g_bmsData.deviceName)+"\"";
+  j+=",\"proto\":"+String(ble_ && ble_->isProtocol32S()?"32":"24");
+  j+=",\"ip\":\""+jsonEscape(WiFi.softAPIP().toString())+"\"";
+  j+=",\"scanCount\":"+String(ble_?ble_->getScanCount():0);
+  j+=",\"scanAttempt\":"+String(g_bmsData.scanAttempt);
+  j+=",\"voltage\":"+String(g_bmsData.totalVoltage,3);
+  j+=",\"current\":"+String(g_bmsData.current,3);
+  j+=",\"power\":"+String(g_bmsData.power,1);
+  j+=",\"remainingAh\":"+String(g_bmsData.remainingCapacityAh,2);
+  j+=",\"remainingKm\":"+String(g_bmsData.remainingRangeKm,1);
+  j+=",\"consumption\":"+String(g_bmsData.energyConsumptionWhKm,1);
+  j+=",\"totalAh\":"+String(g_bmsData.totalCapacityAh,2);
+  j+=",\"soc\":"+String(g_bmsData.soc,1);
+  return j+"}";
+}
+
+String WebConfig::makePage(){
+  return R"HTML(<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>JK BMS 设置</title>
+<style>
+*{box-sizing:border-box}
+body{font-family:Arial,"Microsoft YaHei",sans-serif;background:#0b1015;color:#eee;margin:0;padding:14px}
+.card{max-width:760px;margin:auto;background:#151c23;border-radius:16px;padding:18px;box-shadow:0 5px 25px #000}
+h2{margin:0 0 12px}
+button{padding:11px 15px;margin:5px;border:0;border-radius:9px;background:#1976d2;color:#fff;font-size:15px}
+input,select{padding:11px;margin:5px 0;width:100%;border-radius:8px;border:1px solid #4a5662;background:#0d1217;color:#fff}
+.item{padding:12px;border:1px solid #394652;border-radius:10px;margin:8px 0;background:#10161c}
+.row{display:flex;gap:8px;align-items:center;justify-content:space-between}
+.small{color:#aeb8c2;font-size:13px}
+.ok{color:#45e27b}.warn{color:#ffc107}
+.data{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:12px}
+.data div{background:#0e141a;border-radius:9px;padding:10px}
+.num{font-size:20px;font-weight:bold;color:#55d9ff}
+.tip{color:#8e9aa5;font-size:13px;margin:4px 0 10px}
+</style>
+</head>
+<body>
+<div class="card">
+<h2>JK BMS 蓝牙设置</h2>
+<div id="status" class="small">读取状态...</div>
+
+<label>保护板 MAC（可留空自动扫描）</label>
+<input id="mac" placeholder="例如 AA:BB:CC:DD:EE:FF">
+
+<label>协议型号</label>
+<select id="proto">
+<option value="32">JK02_32S</option>
+<option value="24">JK02_24S</option>
+</select>
+
+<label>每公里耗电量（Wh/km）</label>
+<input id="consumption" type="number" min="1" max="1000" step="1" value="100">
+<div class="tip">用于估算剩余公里数：剩余容量 × 电压 ÷ 每公里耗电量</div>
+
+<div>
+<button onclick="scan()">扫描蓝牙电池</button>
+<button onclick="save()">保存参数</button>
+</div>
+<div id="list"></div>
+
+<div class="data">
+<div>电压<br><span id="v" class="num">0 V</span></div>
+<div>电流<br><span id="i" class="num">0 A</span></div>
+<div>功率<br><span id="p" class="num">0 W</span></div>
+<div>剩余容量<br><span id="ah" class="num">0 Ah</span></div>
+<div>剩余公里数<br><span id="km" class="num">0 km</span></div>
+<div>SOC<br><span id="soc" class="num">0%</span></div>
+</div>
+</div>
+
+<script>
+async function api(url,opt){return await (await fetch(url,opt)).json();}
+async function status(){
+  try{
+    let s=await api('/api/status');
+    document.getElementById('status').innerHTML=
+      '<b class="'+(s.online?'ok':'warn')+'">'+(s.online?'已连接':'未连接')+
+      '</b>　'+s.message+'<br>MAC: '+(s.mac||'未设置')+'　IP: '+s.ip;
+    // 连接成功后，把实际连接的蓝牙地址自动回填到 MAC 输入框。
+    if(s.mac) document.getElementById('mac').value=s.mac;
+    if(s.proto) document.getElementById('proto').value=s.proto;
+    document.getElementById('v').textContent=s.voltage.toFixed(2)+' V';
+    document.getElementById('i').textContent=s.current.toFixed(2)+' A';
+    document.getElementById('p').textContent=s.power.toFixed(0)+' W';
+    document.getElementById('ah').textContent=s.remainingAh.toFixed(2)+' Ah';
+    document.getElementById('km').textContent=s.remainingKm.toFixed(1)+' km';
+    document.getElementById('soc').textContent=s.soc.toFixed(0)+'%';
+    document.getElementById('consumption').value=s.consumption.toFixed(0);
+  }catch(e){}
+}
+async function scan(){
+  document.getElementById('list').innerHTML='正在扫描蓝牙电池，请等待 5 秒...';
+  let r=await api('/api/scan');
+  let h='<h3>扫描结果（点击连接）</h3>';
+  if(!r.items.length) h+='<div class="item">没有找到 JK / BMS 设备</div>';
+  r.items.forEach((x,i)=>{
+    h+='<div class="item"><div class="row"><b>'+x.name+'</b><span>RSSI '+x.rssi+' dBm</span></div>'+
+       '<div class="small">'+x.address+'</div>'+
+       '<button onclick="connectTo('+i+')">连接此电池</button></div>';
+  });
+  document.getElementById('list').innerHTML=h;
+}
+async function connectTo(i){
+  document.getElementById('status').textContent='正在连接选中的蓝牙电池...';
+  let r=await api('/api/connect?index='+i);
+  document.getElementById('status').textContent=r.message;
+  if(r.mac) document.getElementById('mac').value=r.mac;
+  status();
+}
+async function save(){
+  let fd=new FormData();
+  fd.append('mac',document.getElementById('mac').value);
+  fd.append('proto',document.getElementById('proto').value);
+  fd.append('consumption',document.getElementById('consumption').value);
+  let r=await api('/api/save',{method:'POST',body:fd});
+  alert(r.message);
+  status();
+}
+status();
+setInterval(status,1000);
+</script>
+</body></html>)HTML";
+}
+
+void WebConfig::begin(BmsBle* ble){
+  ble_=ble;
+  active_=true;
+
+  // 从 Preferences 读取上次保存的单位里程耗电量。
+  Preferences p;
+  p.begin("jkcfg",true);
+  g_bmsData.energyConsumptionWhKm=p.getFloat("whkm",100.0f);
+  p.end();
+
+  if(g_bmsData.energyConsumptionWhKm<1.0f || g_bmsData.energyConsumptionWhKm>1000.0f)
+    g_bmsData.energyConsumptionWhKm=100.0f;
+
+  server_.on("/",HTTP_GET,[this](){handleRoot();});
+  server_.on("/api/status",HTTP_GET,[this](){handleStatus();});
+  server_.on("/api/scan",HTTP_GET,[this](){handleScan();});
+  server_.on("/api/connect",HTTP_GET,[this](){handleConnect();});
+  server_.on("/api/save",HTTP_POST,[this](){handleSave();});
+  server_.onNotFound([this](){handleNotFound();});
+  server_.begin();
+}
+
+void WebConfig::loop(){
+  if(active_) server_.handleClient();
+}
+
+void WebConfig::handleRoot(){
+  server_.send(200,"text/html; charset=utf-8",makePage());
+}
+
+void WebConfig::handleStatus(){
+  server_.send(200,"application/json; charset=utf-8",makeStatusJson());
+}
+
+void WebConfig::handleScan(){
+  if(!ble_){
+    server_.send(500,"application/json","{\"message\":\"BLE未初始化\",\"items\":[]}");
+    return;
+  }
+  uint8_t count=ble_->scanDevices(5);
+  String j="{\"message\":\"扫描完成\",\"items\":[";
+  for(uint8_t i=0;i<count;i++){
+    if(i) j+=",";
+    const BmsScanItem& x=ble_->getScanItem(i);
+    j+="{\"name\":\""+jsonEscape(x.name)+"\",\"address\":\""+
+      jsonEscape(x.address)+"\",\"rssi\":"+String(x.rssi)+"}";
+  }
+  j+="]}";
+  server_.send(200,"application/json; charset=utf-8",j);
+}
+
+void WebConfig::handleConnect(){
+  if(!ble_){
+    server_.send(500,"application/json","{\"message\":\"BLE未初始化\"}");
+    return;
+  }
+  if(!server_.hasArg("index")){
+    server_.send(400,"application/json","{\"message\":\"缺少index\"}");
+    return;
+  }
+  String indexText=server_.arg("index");
+  indexText.trim();
+  if(indexText.length()==0){
+    server_.send(400,"application/json; charset=utf-8","{\"message\":\"index无效\"}");
+    return;
+  }
+
+  int index=indexText.toInt();
+  if(index<0 || index>=ble_->getScanCount()){
+    server_.send(400,"application/json; charset=utf-8","{\"message\":\"index超出扫描结果范围\"}");
+    return;
+  }
+
+  bool ok=ble_->connectDeviceByIndex((uint8_t)index);
+  String j="{\"ok\":" + String(ok?"true":"false")+
+           ",\"message\":\""+String(ok?"连接成功":"连接失败")+"\""+
+           ",\"mac\":\""+jsonEscape(g_bmsData.mac)+"\"}";
+  server_.send(ok?200:500,"application/json; charset=utf-8",j);
+}
+
+void WebConfig::handleSave(){
+  if(!ble_){
+    server_.send(500,"application/json","{\"message\":\"BLE未初始化\"}");
+    return;
+  }
+
+  String mac=server_.hasArg("mac")?server_.arg("mac"):"";
+  mac.trim();
+
+  // 没有手工填写时，直接保存当前已经连接的 JK 蓝牙地址。
+  if(mac.length()==0 && g_bmsData.mac.length())
+    mac=g_bmsData.mac;
+
+  bool is32=server_.hasArg("proto") ? server_.arg("proto")=="32" : true;
+
+  float whkm=server_.hasArg("consumption") ? server_.arg("consumption").toFloat() : 100.0f;
+  if(whkm<1.0f) whkm=1.0f;
+  if(whkm>1000.0f) whkm=1000.0f;
+
+  ble_->setConfiguredAddress(mac);
+  ble_->setProtocol32S(is32);
+
+  g_bmsData.energyConsumptionWhKm=whkm;
+
+  Preferences p;
+  p.begin("jkcfg",false);
+  p.putBool("32s",is32);
+  p.putFloat("whkm",whkm);
+  p.end();
+
+  // 保存后立即重新计算一次，网页不用重启即可看到新结果。
+  if(g_bmsData.totalVoltage>0.1f && whkm>1.0f){
+    g_bmsData.remainingRangeKm=
+      (g_bmsData.remainingCapacityAh*g_bmsData.totalVoltage)/whkm;
+  }
+
+  server_.send(200,"application/json; charset=utf-8",
+               "{\"message\":\"参数已保存，下次开机自动使用\""
+               ",\"mac\":\""+jsonEscape(mac)+"\"}");
+}
+
+void WebConfig::handleNotFound(){
+  server_.send(404,"text/plain; charset=utf-8","404");
+}
+
+
+// ===== src/main.cpp =====
+static BmsBle bmsBle;
+static Display display;
+static WebConfig webConfig;
+static const char* AP_SSID="JK-BMS-SETUP";
+static const char* AP_PASSWORD="12345678";
+
+RTC_DATA_ATTR static uint8_t rtcFailedScanAttempts=0;
+
+static void startHotspot(){
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(AP_SSID,AP_PASSWORD);
+  IPAddress ip=WiFi.softAPIP();
+  g_bmsData.hotspot=true;
+  g_bmsData.hotspotIp=ip.toString();
+  g_bmsData.bootState=BOOT_HOTSPOT;
+  g_bmsData.statusMessage="等待网页设置";
+  webConfig.begin(&bmsBle);
+  Serial.printf("HOTSPOT: %s %s heap=%u\\n",AP_SSID,ip.toString().c_str(),ESP.getFreeHeap());
+}
+
+void setup(){
+  Serial.begin(115200);
+  delay(50);
+
+  esp_reset_reason_t resetReason=esp_reset_reason();
+  Serial.println();
+  Serial.printf("ESP32 reset reason: %d\\n",(int)resetReason);
+
+  pinMode(TFT_BL,OUTPUT);
+  digitalWrite(TFT_BL,LOW);
+  delay(20);
+
+  g_bmsData.scanMax=3;
+  g_bmsData.online=false;
+  g_bmsData.valid=false;
+  g_bmsData.hotspot=false;
+
+  // 初始化显示和 BLE。
+  display.begin();
+  bmsBle.begin();
+
+  // ================================
+  // 开机优先检查“已经保存的蓝牙地址”
+  // ================================
+  const String savedMac=bmsBle.getConfiguredAddress();
+
+  if(savedMac.length()==0){
+    // 没有保存过蓝牙，直接进入热点配网。
+    g_bmsData.scanAttempt=0;
+    g_bmsData.bootState=BOOT_HOTSPOT;
+    g_bmsData.statusMessage="未保存蓝牙，进入配网";
+    display.update(g_bmsData);
+    delay(100);
+    startHotspot();
+    display.update(g_bmsData);
+    return;
+  }
+
+  // 有保存地址：只尝试连接这个地址，不再盲目扫描其它设备。
+  g_bmsData.scanAttempt=1;
+  g_bmsData.bootState=BOOT_CONNECTING;
+  g_bmsData.statusMessage="连接已保存蓝牙";
+  g_bmsData.mac=savedMac;
+  display.update(g_bmsData);
+  delay(100);
+
+  Serial.printf("BOOT: saved JK MAC = %s\\n",savedMac.c_str());
+
+  bool connectedOk=bmsBle.connectByAddress(savedMac);
+
+  // GATT 连接建立后，还必须收到有效 JK 数据，才算真正成功。
+  if(connectedOk && bmsBle.connected()){
+    uint32_t verifyStart=millis();
+    while(bmsBle.connected() && !g_bmsData.valid &&
+          millis()-verifyStart<4000UL){
+      bmsBle.loop();
+      delay(20);
+    }
+    connectedOk=bmsBle.connected() && g_bmsData.valid;
+  }
+
+  if(connectedOk){
+    g_bmsData.bootState=BOOT_CONNECTED;
+    g_bmsData.online=true;
+    g_bmsData.statusMessage="已连接保存的JK电池";
+    display.update(g_bmsData);
+    Serial.println("BOOT: saved Bluetooth connected and JK data valid.");
+    return;
+  }
+
+  // 保存地址连接失败：先彻底释放 BLE Client，再进入热点。
+  // 特别是“GATT 已连接但 4 秒内没有有效 JK 数据”的情况，
+  // 此时 client_ 仍可能保持连接；不释放就直接启动 AP，容易触发 C3 重启。
+  bmsBle.releaseConnectionForHotspot();
+  g_bmsData.online=false;
+  g_bmsData.valid=false;
+  g_bmsData.bootState=BOOT_HOTSPOT;
+  g_bmsData.statusMessage="蓝牙连接失败，进入配网";
+  display.update(g_bmsData);
+  delay(100);
+
+  Serial.println("BOOT: saved Bluetooth connection failed, entering hotspot.");
+  startHotspot();
+  display.update(g_bmsData);
+}
+void loop(){
+  bmsBle.loop();
+  webConfig.loop();
+  static uint32_t drawMs=0;
+  if(millis()-drawMs>=500){
+    drawMs=millis();
+    display.update(g_bmsData);
+  }
+  delay(5);
+}
