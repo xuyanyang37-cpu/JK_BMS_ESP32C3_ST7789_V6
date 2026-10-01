@@ -34,8 +34,10 @@ const char* JkProtocol::name() const {
   if (p[0] == 0x4E && p[1] == 0x57) return true;
 
   // JK01 / 旧版固定 300-byte frame
-  return p[0] == 0x55 && p[1] == 0xAA &&
-         p[2] == 0xEB && p[3] == 0x90;
+  if (p[0] == 0x55 && p[1] == 0xAA && p[2] == 0xEB && p[3] == 0x90) return true;
+
+  // JK Legacy RS485 bridge response: EB 90 ... fixed 74 bytes.
+  return p[0] == 0xEB && p[1] == 0x90;
 }
 
 // [找帧头] 支持新版4E57和旧版55AAEB90。\nint JkProtocol::findFrameStart(const uint8_t* p, size_t n) const {
@@ -49,6 +51,8 @@ const char* JkProtocol::name() const {
         p[i + 2] == 0xEB && p[i + 3] == 0x90) {
       return (int)i;
     }
+
+    if (p[i] == 0xEB && p[i + 1] == 0x90) return (int)i;
   }
   return -1;
 }
@@ -69,6 +73,8 @@ const char* JkProtocol::name() const {
       p[2] == 0xEB && p[3] == 0x90) {
     return 300;
   }
+
+  if (p[0] == 0xEB && p[1] == 0x90) return 74;
 
   return 0;
 }
@@ -350,6 +356,11 @@ int JkProtocol::detectOffset(const uint8_t*, size_t) const {
   if (!p || n != 300 || n < (size_t)(184 + off)) return false;
   if (!(p[0] == 0x55 && p[1] == 0xAA && p[2] == 0xEB && p[3] == 0x90)) return false;
 
+  // 旧JK固定300字节帧：byte[299]为 byte[0..298] 的8位累加校验。
+  uint8_t crc=0;
+  for(size_t i=0;i<299;i++) crc=(uint8_t)(crc+p[i]);
+  if(crc!=p[299]) return false;
+
   uint32_t mask = u32le(p + 54 + off);
   uint8_t maxCells = protocol32S_ ? Jk02_32S::MAX_CELLS : Jk02_24S::MAX_CELLS;
   uint8_t cells = 0;
@@ -418,11 +429,64 @@ int JkProtocol::detectOffset(const uint8_t*, size_t) const {
   return o.valid;
 }
 
+// [Legacy RS485] 兼容 JK BLE-RS485 bridge 的 EB90 74字节响应。
+// 该流程来自 dionipe 项目公开实现：先做累加校验，再提取总压/节数/电芯/均衡/报警。
+// 仍然由 JkProtocol 负责，因此不会破坏 BmsBle -> Manager -> Protocol 的分层。
+bool JkProtocol::parseLegacyRs485Frame(const uint8_t* p, size_t n, BmsData& o) {
+  if(!p || n!=74) return false;
+  if(p[0]!=0xEB || p[1]!=0x90) return false;
+
+  uint8_t crc=0;
+  for(size_t i=0;i<73;i++) crc=(uint8_t)(crc+p[i]);
+  if(crc!=p[73]) return false;
+
+  auto be16=[](const uint8_t* q)->uint16_t{
+    return (uint16_t(q[0])<<8)|q[1];
+  };
+
+  BmsData d=o;
+  d.deviceName="JK RS485";
+  d.totalVoltage=float(be16(p+4))*0.01f;
+
+  uint8_t cells=p[8];
+  if(cells>JK_MAX_CELLS) cells=JK_MAX_CELLS;
+  d.cellCount=cells;
+
+  d.balancing=(p[11]&0x03)!=0;
+  d.errors=p[12];
+
+  for(uint8_t i=0;i<cells;i++){
+    size_t off=23U+size_t(i)*2U;
+    if(off+1>=73) break;
+    d.cellVoltage[i]=be16(p+off)*0.001f;
+  }
+
+  if(d.totalVoltage<0.5f && d.cellCount>0){
+    float sum=0.0f;
+    for(uint8_t i=0;i<d.cellCount;i++) sum+=d.cellVoltage[i];
+    d.totalVoltage=sum;
+  }
+
+  d.current=0.0f;
+  d.power=0.0f;
+  d.charging=false;
+  d.discharging=false;
+  d.valid=(d.cellCount>0 || d.totalVoltage>0.5f);
+  d.online=d.valid;
+  d.updateMs=millis();
+
+  if(d.valid) o=d;
+  return d.valid;
+}
+
 // [总入口] 根据帧头选择新版或旧版解析。\nbool JkProtocol::parseFrame(const uint8_t* p, size_t n, BmsData& o) {
   if (!canHandle(p, n)) return false;
 
   if (p[0] == 0x4E && p[1] == 0x57)
     return parseNewTlvFrame(p, n, o);
+
+  if (p[0] == 0xEB && p[1] == 0x90)
+    return parseLegacyRs485Frame(p, n, o);
 
   return parseOldFrame(p, n, o);
 }
