@@ -293,14 +293,20 @@ bool BmsBle::connectDeviceByIndex(uint8_t index){
   g_bmsData.statusMessage="已连接JK电池";
   g_bmsData.scanAttempt=scanAttempt_;
 
-  request(0x96);
-  delay(100);
-  request(0x97);
-  // ANT-BMS 与 JK 共用常见 FFE0/FFE1 服务；同时发一次 ANT 状态请求，收到 7E A1 后自动切换解析器。
-  delay(100);
-  requestAntStatus();
-  delay(100);
-  requestTtProbe();
+  // 根据已保存/当前锁定协议决定首次请求，避免已经识别为 ANT/TT 后还混发 JK 指令。
+  String proto=String(protocolManager_.protocolName());
+  if(proto=="ANT"){
+    requestAntStatus();
+  } else {
+    request(0x96);
+    delay(100);
+    request(0x97);
+    // 尚未锁定时保留 ANT/TT 探测，收到有效帧后由 BmsProtocolManager 自动切换。
+    delay(100);
+    requestAntStatus();
+    delay(100);
+    requestTtProbe();
+  }
   lastRequest_=millis();
   return true;
 }
@@ -379,7 +385,7 @@ void BmsBle::handleNotification(const uint8_t* d,size_t n){
     memmove(g_rxBuf,g_rxBuf+expected,g_rxLen-expected);
     g_rxLen-=expected;
   }
-  if(g_legacyAckSeen && g_rxLen==0) lastRequest_=0;
+  if(g_legacyAckSeen && g_rxLen==0){ lastRequest_=0; g_legacyAckSeen=false; }
 }
 
 void BmsBle::requestAntStatus(){
@@ -421,12 +427,25 @@ void BmsBle::request(uint8_t cmd){
       setStatus(BOOT_SCANNING,"蓝牙已断开");
 
     if(g_bmsData.bootState!=BOOT_HOTSPOT &&
-       millis()-lastReconnectAttempt_>=15000){
+       millis()-lastReconnectAttempt_>=5000){
       lastReconnectAttempt_=millis();
       uint8_t reconnectAttempt=scanAttempt_;
       if(reconnectAttempt<1 || reconnectAttempt>3) reconnectAttempt=1;
       if(!scanAndConnect(3,reconnectAttempt)) g_bmsData.online=false;
     }
+    return;
+  }
+
+  // dionipe 的另一个实用增强：数据看似“已连接”但长期没有有效帧时主动重连。
+  // 这里不改变协议层，只把 BLE 传输恢复交给现有重连流程。
+  if(g_bmsData.valid && g_bmsData.updateMs!=0 && millis()-g_bmsData.updateMs>15000UL){
+    Serial.println("BMS BLE: connected but no valid frame for 15s, reconnect");
+    if(client_) client_->disconnect();
+    g_bmsData.online=false;
+    g_bmsData.valid=false;
+    g_rxLen=0;
+    g_legacyAckSeen=false;
+    lastReconnectAttempt_=millis()-5000UL;
     return;
   }
 
