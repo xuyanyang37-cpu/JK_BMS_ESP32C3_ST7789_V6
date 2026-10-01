@@ -27,7 +27,7 @@ bool TtProtocol::canHandle(const uint8_t*d,size_t n) const{
 int TtProtocol::findFrameStart(const uint8_t*d,size_t n) const{
   if(!d) return -1;
   for(size_t i=0;i+1<n;i++)
-    if((d[i]==0x01&&(d[i+1]==0x03||d[i+1]==0x01||(d[i+1]&0x80)))||d[i]==0xEF) return int(i);
+    if((d[i]==0x01&&(d[i+1]==0x03||d[i+1]==0x01||(d[i+1]&0x80)))||d[i]==0xEF){ if(d[i]==0xEF && i+3<n) expectedLen_=7+d[i+3]; else if(i+2<n) expectedLen_=5+d[i+2]; return int(i); }
   return -1;
 }
 bool TtProtocol::parseFrame(const uint8_t*d,size_t n,BmsData&o){
@@ -44,14 +44,14 @@ bool TtProtocol::parseFrame(const uint8_t*d,size_t n,BmsData&o){
 }
 bool TtProtocol::parseModbus(const uint8_t*f,size_t n,BmsData&o){
   if(n<5)return false;
-  if(f[1]==0x18 && f[2]==24){
+  if(f[1]==0x03 && f[2]==24){
     char id[25]; memcpy(id,f+3,24); id[24]=0;
     for(int i=23;i>=0&&id[i]==' ';i--) id[i]=0;
     o.deviceName=String(id);
     o.mac=o.mac;
     o.online=true; o.updateMs=millis(); return false;
   }
-  if(f[1]==0x07 || (f[0]==0x01&&f[1]==0x01&&f[2]==7)){
+  if(f[1]==0x01&&f[2]==7){\n    uint32_t ov=((uint32_t)(f[4]>>4)|((uint32_t)f[5]<<4)|((uint32_t)f[6]<<12))&0xFFFFF;\n    uint32_t uv=((uint32_t)f[7]|((uint32_t)f[8]<<8)|((uint32_t)(f[9]&0x0F)<<16))&0xFFFFF;\n    o.errors=(f[3]&0xFC)|((uint32_t)(f[4]&0x0F)<<8);\n    if(ov||uv)o.errors|=0x80000000UL;\n    o.online=true;o.updateMs=millis();return false;\n  }
     return false;
   }
   if(f[1]!=0x03 || f[2]!=58 || n!=63) return false;
