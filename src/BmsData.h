@@ -20,6 +20,7 @@ struct BmsData {
   float cellVoltage[JK_MAX_CELLS]={0};
   float temperature1=0, temperature2=0, mosTemperature=0;
   float remainingCapacityAh=0, totalCapacityAh=0, balancingCurrent=0;
+  uint32_t cycleCount=0;
   // 剩余里程 = 剩余容量(Ah) × 电压(V) ÷ 每公里耗电(Wh/km)
   float remainingRangeKm=0;
   float energyConsumptionWhKm=100.0f;
