@@ -212,6 +212,37 @@ void WebConfig::handleRoot(){
   server_.send_P(200,"text/html; charset=utf-8",WEB_PAGE);
 }
 
+void WebConfig::handleProtection(){
+  static const char PAGE[] PROGMEM = R"HTML(<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>保护板设置</title>
+<style>
+body{font-family:Arial,"Microsoft YaHei",sans-serif;background:#0b1015;color:#eee;margin:0;padding:14px}
+.card{max-width:760px;margin:auto;background:#151c23;border-radius:16px;padding:18px}
+button,select{padding:11px;margin:5px;border:0;border-radius:9px;font-size:15px}
+button{background:#1976d2;color:#fff}.danger{background:#b3261e}.gray{background:#45515c}
+.item{padding:12px;border:1px solid #394652;border-radius:10px;margin:9px 0;background:#10161c}
+.small{color:#aeb8c2;font-size:13px}.num{font-size:24px;font-weight:bold;color:#55d9ff}
+</style></head><body><div class="card">
+<h2>← 保护板设置</h2>
+<div class="item"><b>当前保护板</b><br><span id="proto" class="num">读取中...</span><div id="detail" class="small">正在读取状态...</div></div>
+<div class="item"><b>手动选择保护板</b><br>
+<select id="sel"><option value="JK">极空 JK</option><option value="ANT">蚂蚁 ANT</option><option value="JBD">JBD</option><option value="DALY">Daly</option><option value="TT">铁塔</option></select>
+<br><button onclick="save()">保存保护板</button><button class="gray" onclick="location.href='/'">返回主页</button>
+</div>
+<div class="item"><b>协议识别</b><br><button onclick="load()">刷新识别结果</button><button class="danger" onclick="clearProto()">清除已保存协议</button></div>
+<div class="item"><b>系统</b><br><span class="small">重启 ESP32 不会删除已保存的蓝牙地址、协议和网页参数。</span><br><button onclick="restart()">重启 ESP32</button></div>
+</div>
+<script>
+async function api(u,o){return await (await fetch(u,o)).json();}
+async function load(){try{let s=await api("/api/status");let p=(s.protoName||s.proto||"NONE").toUpperCase();document.getElementById("proto").textContent=p;document.getElementById("detail").textContent="蓝牙："+(s.name||"未命名")+" MAC："+(s.mac||"未设置")+" 状态："+s.message;document.getElementById("sel").value=p;}catch(e){}}
+async function save(){let fd=new FormData();fd.append("protocol",document.getElementById("sel").value);let r=await api("/api/protection/save",{method:"POST",body:fd});alert(r.message||"已保存");load();}
+async function clearProto(){if(!confirm("清除已保存协议？"))return;let r=await api("/api/protection/clear",{method:"POST"});alert(r.message||"已清除");load();}
+async function restart(){if(!confirm("确定重启 ESP32？"))return;try{await api("/api/restart",{method:"POST"});}catch(e){}document.getElementById("detail").textContent="ESP32 正在重启，请稍候...";}
+load();setInterval(load,2000);
+</script></body></html>)HTML";
+  server_.send_P(200,"text/html; charset=utf-8",PAGE);
+}
+
 // [接口] 返回当前BMS状态，前端定时刷新。\nvoid WebConfig::handleStatus(){
   server_.send(200,"application/json; charset=utf-8",makeStatusJson());
 }
