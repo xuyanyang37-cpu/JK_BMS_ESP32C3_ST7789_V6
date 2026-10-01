@@ -17,6 +17,16 @@ static const char* AP_PASSWORD="12345678";
 RTC_DATA_ATTR static uint8_t rtcFailedScanAttempts=0;
 
 static void startHotspot(){
+  // 三次 BLE 扫描后进入配网时，先关闭 WiFi 驱动的旧状态，
+  // 再只启动 SoftAP，避免 BLE + WiFi 切换时保留无用的 STA 资源。
+  if(g_bmsData.hotspot){
+    Serial.printf("HOTSPOT: already active, skip duplicate begin, heap=%u\\n",ESP.getFreeHeap());
+    return;
+  }
+
+  Serial.printf("HOTSPOT: before WiFi AP heap=%u\\n",ESP.getFreeHeap());
+  WiFi.mode(WIFI_OFF);
+  delay(80);
   WiFi.mode(WIFI_AP);
   WiFi.softAP(AP_SSID,AP_PASSWORD);
   IPAddress ip=WiFi.softAPIP();
@@ -112,8 +122,9 @@ void setup(){
   display.update(g_bmsData);
   delay(100);
 
-  Serial.println("BOOT: 3 scan attempts failed, entering hotspot.");
+  Serial.printf("BOOT: 3 scan attempts failed, before hotspot heap=%u\\n",ESP.getFreeHeap());
   startHotspot();
+  Serial.printf("BOOT: hotspot ready heap=%u\\n",ESP.getFreeHeap());
   display.update(g_bmsData);
 }
 
