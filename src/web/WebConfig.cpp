@@ -361,6 +361,9 @@ void WebConfig::handleProtectionClear(){
   p.remove("protocol");
   p.end();
   if(ble_) ble_->setPreferredProtocol("JK");
+  p.begin("jkcfg",false);
+  p.remove("protocol");
+  p.end();
   server_.send(200,"application/json; charset=utf-8",R"({"message":"已清除保存协议"})");
 }
 
