@@ -22,7 +22,7 @@ int BmsProtocolManager::findFrameStart(const uint8_t*d,size_t n){
   int best=-1; BmsProtocol* list[]={&jkProtocol_,&antProtocol_,&jbdProtocol_,&dalyProtocol_};
   for(size_t i=0;i<sizeof(list)/sizeof(list[0]);i++){
     int s=list[i]->findFrameStart(d,n);
-    if(s>=0&&(best<0||s<best)) best=s;
+    if(s>=0&&(best<0||s<best)){ best=s; activeProtocol_=list[i]; }
   }
   return best;
 }
