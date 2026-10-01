@@ -41,66 +41,69 @@ void setup(){
   delay(20);
 
   g_bmsData.scanMax=3;
+  g_bmsData.scanAttempt=0;
   g_bmsData.online=false;
   g_bmsData.valid=false;
   g_bmsData.hotspot=false;
+  g_bmsData.bootState=BOOT_START;
+  g_bmsData.statusMessage="连接电池";
 
-  // 初始化显示和 BLE。
+  // 保持 V2 最后确认 OK 的开机连接流程：
+  // 连接电池 -> 扫描 1/3 -> 2/3 -> 3/3 -> 找到后连接并验证 JK 数据。
+  // 只有连续 3 次扫描/连接均失败才进入热点配网。
   display.begin();
+  display.update(g_bmsData);
   bmsBle.begin();
 
-  // ================================
-  // 开机优先检查“已经保存的蓝牙地址”
-  // ================================
-  const String savedMac=bmsBle.getConfiguredAddress();
+  bool connectedOk=false;
 
-  if(savedMac.length()==0){
-    // 没有保存过蓝牙，直接进入热点配网。
-    g_bmsData.scanAttempt=0;
-    g_bmsData.bootState=BOOT_HOTSPOT;
-    g_bmsData.statusMessage="未保存蓝牙，进入配网";
+  for(uint8_t attempt=1; attempt<=3; attempt++){
+    g_bmsData.scanAttempt=attempt;
+    g_bmsData.bootState=BOOT_SCANNING;
+    g_bmsData.statusMessage="扫描蓝牙电池 "+String(attempt)+"/3";
     display.update(g_bmsData);
-    delay(100);
-    startHotspot();
-    display.update(g_bmsData);
-    return;
-  }
 
-  // 有保存地址：只尝试连接这个地址，不再盲目扫描其它设备。
-  g_bmsData.scanAttempt=1;
-  g_bmsData.bootState=BOOT_CONNECTING;
-  g_bmsData.statusMessage="连接已保存蓝牙";
-  g_bmsData.mac=savedMac;
-  display.update(g_bmsData);
-  delay(100);
+    Serial.printf("BOOT: V2 scan attempt %u/3\\n",attempt);
 
-  Serial.printf("BOOT: saved JK MAC = %s\\n",savedMac.c_str());
+    if(bmsBle.scanAndConnect(3,attempt)){
+      // GATT 已连接后，必须收到有效 JK 数据才算真正成功。
+      uint32_t verifyStart=millis();
+      while(bmsBle.connected() && !g_bmsData.valid &&
+            millis()-verifyStart<4000UL){
+        bmsBle.loop();
+        display.update(g_bmsData);
+        delay(20);
+      }
 
-  bool connectedOk=bmsBle.connectByAddress(savedMac);
+      if(bmsBle.connected() && g_bmsData.valid){
+        connectedOk=true;
+        break;
+      }
 
-  // GATT 连接建立后，还必须收到有效 JK 数据，才算真正成功。
-  if(connectedOk && bmsBle.connected()){
-    uint32_t verifyStart=millis();
-    while(bmsBle.connected() && !g_bmsData.valid &&
-          millis()-verifyStart<4000UL){
-      bmsBle.loop();
-      delay(20);
+      bmsBle.releaseConnectionForHotspot();
     }
-    connectedOk=bmsBle.connected() && g_bmsData.valid;
+
+    g_bmsData.online=false;
+    g_bmsData.valid=false;
+
+    if(attempt<3){
+      g_bmsData.bootState=BOOT_SCANNING;
+      g_bmsData.statusMessage="第 "+String(attempt)+"/3 次未连接，继续扫描";
+      display.update(g_bmsData);
+      delay(300);
+    }
   }
 
   if(connectedOk){
     g_bmsData.bootState=BOOT_CONNECTED;
     g_bmsData.online=true;
-    g_bmsData.statusMessage="已连接保存的JK电池";
+    g_bmsData.statusMessage="已连接JK电池";
     display.update(g_bmsData);
-    Serial.println("BOOT: saved Bluetooth connected and JK data valid.");
+    Serial.println("BOOT: V2 connection screen flow completed, JK data valid.");
     return;
   }
 
-  // 保存地址连接失败：先彻底释放 BLE Client，再进入热点。
-  // 特别是“GATT 已连接但 4 秒内没有有效 JK 数据”的情况，
-  // 此时 client_ 仍可能保持连接；不释放就直接启动 AP，容易触发 C3 重启。
+  // V2 原流程：三次扫描/连接失败后进入热点模式。
   bmsBle.releaseConnectionForHotspot();
   g_bmsData.online=false;
   g_bmsData.valid=false;
@@ -109,13 +112,15 @@ void setup(){
   display.update(g_bmsData);
   delay(100);
 
-  Serial.println("BOOT: saved Bluetooth connection failed, entering hotspot.");
+  Serial.println("BOOT: 3 scan attempts failed, entering hotspot.");
   startHotspot();
   display.update(g_bmsData);
 }
+
 void loop(){
   bmsBle.loop();
   webConfig.loop();
+
   static uint32_t drawMs=0;
   if(millis()-drawMs>=500){
     drawMs=millis();
