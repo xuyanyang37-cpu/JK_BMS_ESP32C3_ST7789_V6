@@ -9,7 +9,7 @@ BmsBle* BmsBle::instance_=nullptr;
 
 BmsBle::BmsBle()
   : client_(nullptr),ch_(nullptr),writeCh_(nullptr),notifyCh_(nullptr),
-    counter_(0),lastRequest_(0),lastReconnectAttempt_(0),
+    counter_(0),ttPollCounter_(0),ttProbeCount_(0),lastRequest_(0),lastReconnectAttempt_(0),
     scanCount_(0),scanAttempt_(0),configuredAddressType_(BLE_ADDR_PUBLIC),
     protocol32S_(true),configuredAddress_("") {
   instance_=this;
@@ -54,7 +54,7 @@ bool BmsBle::isCandidate(const NimBLEAdvertisedDevice* d) const{
   String n=d->getName().c_str();
   n.toUpperCase();
   return d->isAdvertisingService(NimBLEUUID(SERVICE)) ||
-         n.indexOf("JK")>=0 || n.indexOf("JIKONG")>=0 || n.indexOf("BMS")>=0;
+         n.indexOf("JDY-33")>=0 || n.indexOf("JDY33")>=0 || n.indexOf("JDY")>=0 || n.indexOf("JK")>=0 || n.indexOf("JIKONG")>=0 || n.indexOf("BMS")>=0;
 }
 
 uint8_t BmsBle::scanDevices(uint32_t sec){
@@ -221,8 +221,12 @@ bool BmsBle::connectByAddress(const String& address,uint8_t addressType){
   g_bmsData.mac=address;
   g_bmsData.online=true;
   g_bmsData.bootState=BOOT_CONNECTED;
-  g_bmsData.statusMessage="已连接JK电池";
+  g_bmsData.statusMessage="BLE已连接，正在探测铁塔协议";
   g_bmsData.scanAttempt=scanAttempt_;
+
+  ttProbeCount_=0;
+  ttPollCounter_=0;
+  lastRequest_=millis()-250;
 
   request(0x96);
   delay(100);
@@ -308,7 +312,10 @@ void BmsBle::request(uint8_t cmd){
   uint8_t f[20];
   if(!protocolManager_.buildCommand(cmd,counter_++,f)) return;
   size_t n=20;
-  if(String(protocolManager_.protocolName())=="TT") n=(cmd==0x03||cmd==0x18||cmd==0x01)?8:8;
+  if(String(protocolManager_.protocolName())=="TT"){
+    if(cmd==0x03 || cmd==0x18 || cmd==0x01) n=8;
+    else if(cmd==0xCA) n=7;
+  }
   if(writer->canWriteNoResponse()) writer->writeValue(f,n,false);
   else if(writer->canWrite()) writer->writeValue(f,n,true);
 }
@@ -332,12 +339,22 @@ void BmsBle::loop(){
 
   if(String(protocolManager_.protocolName())=="TT"){
     if(millis()-lastRequest_>=250){
-      request(0x03);
+      uint8_t cmd=0x03;
+      if((ttPollCounter_%6)==3) cmd=0x18;
+      else if((ttPollCounter_%6)==5) cmd=0x01;
+      request(cmd);
+      ttPollCounter_++;
       lastRequest_=millis();
     }
   } else {
+    if(ttProbeCount_<3 && millis()-lastRequest_>=250){
+      requestTtProbe();
+      ttProbeCount_++;
+      lastRequest_=millis();
+    } else {
     uint32_t requestInterval=g_bmsData.valid?5000UL:1500UL;
-    if(millis()-lastRequest_>requestInterval){ request(0x96); requestAntStatus(); requestTtProbe(); lastRequest_=millis(); }
+    if(millis()-lastRequest_>requestInterval){ request(0x96); requestAntStatus(); lastRequest_=millis(); }
+    }
   }
 }
 
