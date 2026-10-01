@@ -51,7 +51,8 @@ bool TtProtocol::parseModbus(const uint8_t*f,size_t n,BmsData&o){
     o.mac=o.mac;
     o.online=true; o.updateMs=millis(); return false;
   }
-  if(f[1]==0x01&&f[2]==7){\n    uint32_t ov=((uint32_t)(f[4]>>4)|((uint32_t)f[5]<<4)|((uint32_t)f[6]<<12))&0xFFFFF;\n    uint32_t uv=((uint32_t)f[7]|((uint32_t)f[8]<<8)|((uint32_t)(f[9]&0x0F)<<16))&0xFFFFF;\n    o.errors=(f[3]&0xFC)|((uint32_t)(f[4]&0x0F)<<8);\n    if(ov||uv)o.errors|=0x80000000UL;\n    o.online=true;o.updateMs=millis();return false;\n  }
+  if(f[1]==0x01&&f[2]==7){
+    uint32_t ov=((uint32_t)(f[4]>>4)|((uint32_t)f[5]<<4)|((uint32_t)f[6]<<12))&0xFFFFF;\n    uint32_t uv=((uint32_t)f[7]|((uint32_t)f[8]<<8)|((uint32_t)(f[9]&0x0F)<<16))&0xFFFFF;\n    o.errors=(f[3]&0xFC)|((uint32_t)(f[4]&0x0F)<<8);\n    if(ov||uv)o.errors|=0x80000000UL;\n    o.online=true;o.updateMs=millis();return false;\n  }
     return false;
   }
   if(f[1]!=0x03 || f[2]!=58 || n!=63) return false;
