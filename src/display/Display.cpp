@@ -74,11 +74,15 @@ namespace {
     sprite.drawCircle(15, 14, 11, color);
     sprite.setTextColor(color, UI_PANEL);
     sprite.drawCentreString(String(icon), 15, 5, 2);
+    sprite.drawCentreString(String(icon), 16, 5, 2);
 
     FontGB2312::drawText(sprite, 31, 7,
                          String(label), color, UI_PANEL, 1);
+    FontGB2312::drawText(sprite, 32, 7,
+                         String(label), color, UI_PANEL, 1);
 
     sprite.setTextColor(color, UI_PANEL);
+    sprite.drawRightString(value, 163, 1, 4);
     sprite.drawRightString(value, 164, 1, 4);
   }
 }
@@ -109,7 +113,7 @@ void Display::begin() {
   socSprite_.createSprite(140, 109);
   leftInfoSprite_.createSprite(140, 36);
   rowSprite_.createSprite(168, 36);
-  barSprite_.createSprite(312, 11);
+  barSprite_.createSprite(312, 14);
 
   socSprite_.fillSprite(TFT_BLACK);
   leftInfoSprite_.fillSprite(TFT_BLACK);
@@ -442,9 +446,11 @@ void Display::drawSoc(const BmsData& d) {
 
   socSprite_.setTextColor(color, UI_PANEL);
   socSprite_.drawCentreString(value, 68, 20, 7);
+  socSprite_.drawCentreString(value, 69, 20, 7);
 
   socSprite_.setTextColor(color, UI_PANEL);
   socSprite_.drawString("%", 106, 73, 4);
+  socSprite_.drawString("%", 107, 73, 4);
 
   socSprite_.pushSprite(4, 4);
 }
@@ -461,13 +467,16 @@ void Display::drawTemperature(const BmsData& d) {
 
   leftInfoSprite_.setTextColor(UI_TEMP, UI_PANEL);
   leftInfoSprite_.drawString(temp, 4, 10, 2);
+  leftInfoSprite_.drawString(temp, 5, 10, 2);
   leftInfoSprite_.drawString(delta, 34, 10, 2);
+  leftInfoSprite_.drawString(delta, 35, 10, 2);
 
   leftInfoSprite_.setTextColor(UI_WHITE, UI_PANEL);
   leftInfoSprite_.drawCentreString("Ah", 87, 3, 1);
 
   String cap = String(d.remainingCapacityAh, 1);
   leftInfoSprite_.drawCentreString(cap, 119, 9, 2);
+  leftInfoSprite_.drawCentreString(cap, 120, 9, 2);
 
   leftInfoSprite_.pushSprite(4, 117);
 }
@@ -495,16 +504,22 @@ void Display::drawPower(const BmsData& d) {
 
 void Display::drawRange(const BmsData& d) {
   rowSprite_.fillSprite(TFT_BLACK);
-  rowSprite_.fillRoundRect(0, 0, 168, 28, 7, UI_PANEL);
+  rowSprite_.fillRoundRect(0, 0, 168, 36, 7, UI_PANEL);
 
-  FontGB2312::drawText(rowSprite_, 8, 5,
+  FontGB2312::drawText(rowSprite_, 8, 7,
+                       "剩余里程",
+                       UI_RANGE, UI_PANEL, 1);
+  FontGB2312::drawText(rowSprite_, 9, 7,
                        "剩余里程",
                        UI_RANGE, UI_PANEL, 1);
 
   rowSprite_.setTextColor(UI_RANGE, UI_PANEL);
   rowSprite_.drawRightString(
       String(d.remainingRangeKm, 0) + " KM",
-      164, 5, 2);
+      163, 1, 4);
+  rowSprite_.drawRightString(
+      String(d.remainingRangeKm, 0) + " KM",
+      164, 1, 4);
 
   rowSprite_.pushSprite(148, 118);
 }
@@ -517,7 +532,7 @@ void Display::drawSocBar(const BmsData& d) {
   if (ratio > 1.0f) ratio = 1.0f;
 
   const int16_t w = 312;
-  const int16_t h = 11;
+  const int16_t h = 14;
   int filled = (int)(w * ratio + 0.5f);
 
   for (int16_t x = 0; x < w; ++x) {
@@ -546,5 +561,5 @@ void Display::drawSocBar(const BmsData& d) {
   }
 
   barSprite_.drawRoundRect(0, 0, w, h, 3, TFT_DARKGREY);
-  barSprite_.pushSprite(4, 157);
+  barSprite_.pushSprite(4, 156);
 }
