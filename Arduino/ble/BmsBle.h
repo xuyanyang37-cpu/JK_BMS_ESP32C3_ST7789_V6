@@ -5,7 +5,7 @@
 #include "../BmsData.h"
 #include "../protocol/BmsProtocolManager.h"
 
-#define BMS_SCAN_RESULT_MAX 8
+// 扫描结果上限统一由 BmsData.h 定义，避免不同模块出现容量不一致。
 
 struct BmsScanItem {
   String address;
