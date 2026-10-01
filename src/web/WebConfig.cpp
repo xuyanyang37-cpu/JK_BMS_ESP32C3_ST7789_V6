@@ -62,7 +62,9 @@ input,select{padding:11px;margin:5px 0;width:100%;border-radius:8px;border:1px s
 
 <script>
 async function api(url,opt){return await (await fetch(url,opt)).json();}
-let statusBusy=false;\nasync function status(){\n  if(statusBusy)return;\n  statusBusy=true;
+let statusBusy=false;
+async function status(){
+  if(statusBusy)return;\n  statusBusy=true;
   try{
     let s=await api('/api/status');
     document.getElementById('status').innerHTML=
@@ -130,7 +132,9 @@ String WebConfig::jsonEscape(const String& s){
 }
 
 String WebConfig::makeStatusJson(){
-  String j;\n  j.reserve(640);\n  j="{";
+  String j;
+  j.reserve(640);
+  j="{";
   j+="\"online\":"+String(g_bmsData.online?"true":"false");
   j+=",\"state\":"+String((int)g_bmsData.bootState);
   j+=",\"message\":\""+jsonEscape(g_bmsData.statusMessage)+"\"";
