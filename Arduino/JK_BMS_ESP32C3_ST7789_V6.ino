@@ -474,39 +474,88 @@ bool TtProtocol::parseFrame(const uint8_t*d,size_t n,BmsData&o){
 }
 bool TtProtocol::parseModbus(const uint8_t*f,size_t n,BmsData&o){
   if(n<5)return false;
+
+  // 0x18：设备ID
   if(f[1]==0x03 && f[2]==24){
-    char id[25]; memcpy(id,f+3,24); id[24]=0;
+    char id[25];
+    memcpy(id,f+3,24);
+    id[24]=0;
     for(int i=23;i>=0&&id[i]==' ';i--) id[i]=0;
     o.deviceName=String(id);
-    o.mac=o.mac;
-    o.online=true; o.updateMs=millis(); return false;
-  }
-  if(f[1]==0x01&&f[2]==7){\n    uint32_t ov=((uint32_t)(f[4]>>4)|((uint32_t)f[5]<<4)|((uint32_t)f[6]<<12))&0xFFFFF;\n    uint32_t uv=((uint32_t)f[7]|((uint32_t)f[8]<<8)|((uint32_t)(f[9]&0x0F)<<16))&0xFFFFF;\n    o.errors=(f[3]&0xFC)|((uint32_t)(f[4]&0x0F)<<8);\n    if(ov||uv)o.errors|=0x80000000UL;\n    o.online=true;o.updateMs=millis();return false;\n  }
+    o.online=true;
+    o.updateMs=millis();
     return false;
   }
+
+  // 0x07：告警/开关/过压欠压掩码
+  if(f[1]==0x01 && f[2]==7){
+    uint32_t ov=((uint32_t)(f[4]>>4)|
+                 ((uint32_t)f[5]<<4)|
+                 ((uint32_t)f[6]<<12))&0xFFFFF;
+    uint32_t uv=((uint32_t)f[7]|
+                 ((uint32_t)f[8]<<8)|
+                 ((uint32_t)(f[9]&0x0F)<<16))&0xFFFFF;
+    o.errors=(uint32_t)(f[3]&0xFC)|
+             ((uint32_t)(f[4]&0x0F)<<8);
+    if(ov||uv)o.errors|=0x80000000UL;
+    o.online=true;
+    o.updateMs=millis();
+    return false;
+  }
+
+  // 0x3A：实时模拟量
   if(f[1]!=0x03 || f[2]!=58 || n!=63) return false;
+
   uint16_t tv=be16(f+3);
-  if(tv==0xFFFD){o.valid=false;o.online=true;return false;}
-  uint8_t cells=uint8_t(be16(f+5)); if(cells>20)cells=20;
+  if(tv==0xFFFD){
+    o.valid=false;
+    o.online=true;
+    return false;
+  }
+
+  uint8_t cells=(uint8_t)be16(f+5);
+  if(cells>20) cells=20;
+
   o.totalVoltage=tv*0.01f;
   o.cellCount=cells;
   o.soc=be16(f+7);
+  if(o.soc>100.0f)o.soc=100.0f;
   o.remainingCapacityAh=be16(f+9)*0.01f;
-  o.totalCapacityAh=o.totalCapacityAh>0?o.totalCapacityAh:o.remainingCapacityAh;
   o.current=decodeCurrent(be16(f+13))*0.01f;
-  int t1=decodeTemp(be16(f+15)),t2=decodeTemp(be16(f+17)),t3=decodeTemp(be16(f+19));
+
+  int t1=decodeTemp(be16(f+15));
+  int t2=decodeTemp(be16(f+17));
+  int t3=decodeTemp(be16(f+19));
   o.temperature1=(t1==-128)?0:t1;
   o.temperature2=(t2==-128)?0:t2;
   o.mosTemperature=(t3==-128)?0:t3;
-  float minV=100,maxV=0;uint8_t minC=0,maxC=0;
-  for(uint8_t i=0;i<JK_MAX_CELLS;i++)o.cellVoltage[i]=0;
+
+  float minV=100,maxV=0;
+  uint8_t minC=0,maxC=0;
+  for(uint8_t i=0;i<JK_MAX_CELLS;i++) o.cellVoltage[i]=0;
+
   for(uint8_t i=0;i<cells;i++){
-    float v=be16(f+21+i*2)*0.001f;o.cellVoltage[i]=v;
-    if(v>=0.5f&&v<=6.0f){if(v<minV){minV=v;minC=i+1;}if(v>maxV){maxV=v;maxC=i+1;}}
+    float v=be16(f+21+i*2)*0.001f;
+    o.cellVoltage[i]=v;
+    if(v>=0.5f&&v<=6.0f){
+      if(v<minV){minV=v;minC=i+1;}
+      if(v>maxV){maxV=v;maxC=i+1;}
+    }
   }
-  o.minCellVoltage=(minV<100)?minV:0;o.maxCellVoltage=maxV;o.deltaCellVoltage=(maxV>0&&minV<100)?maxV-minV:0;o.minCell=minC;o.maxCell=maxC;
-  o.power=o.totalVoltage*o.current;o.online=true;o.valid=true;o.updateMs=millis();
-  if(o.energyConsumptionWhKm>1)o.remainingRangeKm=(o.remainingCapacityAh*o.totalVoltage)/o.energyConsumptionWhKm;
+
+  o.minCellVoltage=(minV<100)?minV:0;
+  o.maxCellVoltage=maxV;
+  o.deltaCellVoltage=(maxV>0&&minV<100)?maxV-minV:0;
+  o.minCell=minC;
+  o.maxCell=maxC;
+  o.power=o.totalVoltage*o.current;
+  o.online=true;
+  o.valid=true;
+  o.updateMs=millis();
+
+  if(o.energyConsumptionWhKm>1.0f)
+    o.remainingRangeKm=(o.remainingCapacityAh*o.totalVoltage)/
+                       o.energyConsumptionWhKm;
   return true;
 }
 bool TtProtocol::parseEf(const uint8_t*f,size_t n,BmsData&o){
