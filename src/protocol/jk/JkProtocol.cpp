@@ -158,6 +158,8 @@ bool JkProtocol::parseNewTlvFrame(const uint8_t* p, size_t n, BmsData& o) {
   if (declared != n || declared > FRAME_MAX) return false;
 
   BmsData d;
+  // 保留网页配置的每公里耗电量，避免每次 BMS 更新后被默认值 100 覆盖。
+  d.energyConsumptionWhKm = o.energyConsumptionWhKm;
   const uint8_t* cur = p + 10;       // 4E57 + length + address/type/counter
   const uint8_t* end = p + n - 4;    // last 4 bytes are frame checksum
 
@@ -254,7 +256,7 @@ bool JkProtocol::parseNewTlvFrame(const uint8_t* p, size_t n, BmsData& o) {
         break;
 
       case 0xBA: {
-        size_t copyLen = sz < sizeof(d.deviceName) - 1 ? sz : sizeof(d.deviceName) - 1;
+        size_t copyLen = sz < 16 ? sz : 16;
         // BmsData.deviceName is String, so copy through a temporary C string.
         char nameBuf[17];
         memcpy(nameBuf, cur, copyLen);
