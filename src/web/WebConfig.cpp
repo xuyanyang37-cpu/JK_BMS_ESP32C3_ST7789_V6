@@ -1,47 +1,9 @@
 #include "WebConfig.h"
 #include <WiFi.h>
 #include <Preferences.h>
+#include <pgmspace.h>
 
-WebConfig::WebConfig():server_(80),ble_(nullptr),active_(false){}
-
-String WebConfig::jsonEscape(const String& s){
-  String o;
-  for(size_t i=0;i<s.length();i++){
-    char c=s[i];
-    if(c=='"') o+="\\\"";
-    else if(c=='\\') o+="\\\\";
-    else if(c=='\n') o+="\\n";
-    else if(c=='\r') o+="\\r";
-    else if(c=='\t') o+="\\t";
-    else o+=c;
-  }
-  return o;
-}
-
-String WebConfig::makeStatusJson(){
-  String j="{";
-  j+="\"online\":"+String(g_bmsData.online?"true":"false");
-  j+=",\"state\":"+String((int)g_bmsData.bootState);
-  j+=",\"message\":\""+jsonEscape(g_bmsData.statusMessage)+"\"";
-  j+=",\"mac\":\""+jsonEscape(g_bmsData.mac.length()?g_bmsData.mac:ble_?ble_->getConfiguredAddress():"")+"\"";
-  j+=",\"name\":\""+jsonEscape(g_bmsData.deviceName)+"\"";
-  j+=",\"proto\":"+String(ble_ && ble_->isProtocol32S()?"32":"24");
-  j+=",\"ip\":\""+jsonEscape(WiFi.softAPIP().toString())+"\"";
-  j+=",\"scanCount\":"+String(ble_?ble_->getScanCount():0);
-  j+=",\"scanAttempt\":"+String(g_bmsData.scanAttempt);
-  j+=",\"voltage\":"+String(g_bmsData.totalVoltage,3);
-  j+=",\"current\":"+String(g_bmsData.current,3);
-  j+=",\"power\":"+String(g_bmsData.power,1);
-  j+=",\"remainingAh\":"+String(g_bmsData.remainingCapacityAh,2);
-  j+=",\"remainingKm\":"+String(g_bmsData.remainingRangeKm,1);
-  j+=",\"consumption\":"+String(g_bmsData.energyConsumptionWhKm,1);
-  j+=",\"totalAh\":"+String(g_bmsData.totalCapacityAh,2);
-  j+=",\"soc\":"+String(g_bmsData.soc,1);
-  return j+"}";
-}
-
-String WebConfig::makePage(){
-  return R"HTML(<!doctype html>
+static const char WEB_PAGE[] PROGMEM = R"HTML(<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -100,7 +62,7 @@ input,select{padding:11px;margin:5px 0;width:100%;border-radius:8px;border:1px s
 
 <script>
 async function api(url,opt){return await (await fetch(url,opt)).json();}
-async function status(){
+let statusBusy=false;\nasync function status(){\n  if(statusBusy)return;\n  statusBusy=true;
   try{
     let s=await api('/api/status');
     document.getElementById('status').innerHTML=
@@ -116,7 +78,7 @@ async function status(){
     document.getElementById('km').textContent=s.remainingKm.toFixed(1)+' km';
     document.getElementById('soc').textContent=s.soc.toFixed(0)+'%';
     document.getElementById('consumption').value=s.consumption.toFixed(0);
-  }catch(e){}
+  }catch(e){} finally { statusBusy=false; }
 }
 async function scan(){
   document.getElementById('list').innerHTML='正在扫描蓝牙电池，请等待 5 秒...';
@@ -147,12 +109,52 @@ async function save(){
   status();
 }
 status();
-setInterval(status,1000);
+setInterval(status,2000);
 </script>
 </body></html>)HTML";
+
+WebConfig::WebConfig():server_(80),ble_(nullptr),active_(false){}
+
+String WebConfig::jsonEscape(const String& s){
+  String o;
+  for(size_t i=0;i<s.length();i++){
+    char c=s[i];
+    if(c=='"') o+="\\\"";
+    else if(c=='\\') o+="\\\\";
+    else if(c=='\n') o+="\\n";
+    else if(c=='\r') o+="\\r";
+    else if(c=='\t') o+="\\t";
+    else o+=c;
+  }
+  return o;
+}
+
+String WebConfig::makeStatusJson(){
+  String j;\n  j.reserve(640);\n  j="{";
+  j+="\"online\":"+String(g_bmsData.online?"true":"false");
+  j+=",\"state\":"+String((int)g_bmsData.bootState);
+  j+=",\"message\":\""+jsonEscape(g_bmsData.statusMessage)+"\"";
+  j+=",\"mac\":\""+jsonEscape(g_bmsData.mac.length()?g_bmsData.mac:ble_?ble_->getConfiguredAddress():"")+"\"";
+  j+=",\"name\":\""+jsonEscape(g_bmsData.deviceName)+"\"";
+  j+=",\"proto\":"+String(ble_ && ble_->isProtocol32S()?"32":"24");
+  j+=",\"ip\":\""+jsonEscape(WiFi.softAPIP().toString())+"\"";
+  j+=",\"scanCount\":"+String(ble_?ble_->getScanCount():0);
+  j+=",\"scanAttempt\":"+String(g_bmsData.scanAttempt);
+  j+=",\"voltage\":"+String(g_bmsData.totalVoltage,3);
+  j+=",\"current\":"+String(g_bmsData.current,3);
+  j+=",\"power\":"+String(g_bmsData.power,1);
+  j+=",\"remainingAh\":"+String(g_bmsData.remainingCapacityAh,2);
+  j+=",\"remainingKm\":"+String(g_bmsData.remainingRangeKm,1);
+  j+=",\"consumption\":"+String(g_bmsData.energyConsumptionWhKm,1);
+  j+=",\"totalAh\":"+String(g_bmsData.totalCapacityAh,2);
+  j+=",\"soc\":"+String(g_bmsData.soc,1);
+  return j+"}";
 }
 
 void WebConfig::begin(BmsBle* ble){
+  // 只初始化一次。热点模式下不要重复注册 WebServer 路由，
+  // 否则会不断创建回调对象并造成堆碎片。
+  if(active_) return;
   ble_=ble;
   active_=true;
 
@@ -179,7 +181,8 @@ void WebConfig::loop(){
 }
 
 void WebConfig::handleRoot(){
-  server_.send(200,"text/html; charset=utf-8",makePage());
+  // 页面常量放在 Flash，访问网页时不再创建几 KB 的临时 String。
+  server_.send_P(200,"text/html; charset=utf-8",WEB_PAGE);
 }
 
 void WebConfig::handleStatus(){
