@@ -34,6 +34,8 @@ public:
   uint8_t getScanAttempt() const { return scanAttempt_; }
   void setProtocol32S(bool enable){ protocol32S_=enable; protocolManager_.setProtocol32S(enable); }
   bool isProtocol32S() const { return protocol32S_; }
+  void setPreferredProtocol(const String& name);
+  String getPreferredProtocol() const;
   const char* protocolName() const { return protocolManager_.protocolName(); }
 
 private:
