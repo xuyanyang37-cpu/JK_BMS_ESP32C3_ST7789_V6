@@ -30,6 +30,14 @@ bool BmsBle::begin(){
   p.end();
 
   protocolManager_.begin(protocol32S_);
+
+  // 预留固定容量，避免三轮扫描时反复扩容 String，
+  // 减少 ESP32-C3 堆碎片，为最后启动 SoftAP 留出连续内存。
+  for(uint8_t i=0;i<BMS_SCAN_RESULT_MAX;i++){
+    scanItems_[i].address.reserve(18);
+    scanItems_[i].name.reserve(24);
+  }
+
   return true;
 }
 
