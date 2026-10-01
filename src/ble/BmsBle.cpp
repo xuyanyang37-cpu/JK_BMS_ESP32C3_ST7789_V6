@@ -1,3 +1,34 @@
+/*
+ * ================================================================
+ * BmsBle.cpp - 蓝牙业务层
+ *
+ * 业务顺序：
+ *   begin()
+ *      ↓
+ *   读取 Preferences
+ *      ↓
+ *   scanAndConnect()
+ *      ↓
+ *   scanDevices()
+ *      ↓
+ *   connectByAddress()
+ *      ↓
+ *   找服务/特征 + subscribe
+ *      ↓
+ *   request()
+ *      ↓
+ *   Notify
+ *      ↓
+ *   handleNotification()
+ *      ↓
+ *   BmsProtocolManager
+ *      ↓
+ *   g_bmsData
+ *
+ * 这里“只负责传输”，协议字段含义由 protocol/ 负责。
+ * ================================================================
+ */
+
 #include "BmsBle.h"
 #include <Preferences.h>
 #include <string.h>
@@ -15,7 +46,7 @@ BmsBle::BmsBle()
   instance_=this;
 }
 
-bool BmsBle::begin(){
+// [入口] BLE初始化。开机只调用一次。\nbool BmsBle::begin(){
   NimBLEDevice::init("JK-C3-DISPLAY");
   NimBLEDevice::setPower(9);
 
@@ -65,7 +96,7 @@ bool BmsBle::isCandidate(const NimBLEAdvertisedDevice* d) const{
          n.indexOf("JK")>=0 || n.indexOf("JIKONG")>=0 || n.indexOf("BMS")>=0;
 }
 
-uint8_t BmsBle::scanDevices(uint32_t sec){
+// [流程1] 扫描附近设备，只保留 JK/BMS/指定Service 的候选设备。\nuint8_t BmsBle::scanDevices(uint32_t sec){
   scanCount_=0;
   NimBLEScan* s=NimBLEDevice::getScan();
   s->setActiveScan(true);
@@ -94,7 +125,7 @@ uint8_t BmsBle::scanDevices(uint32_t sec){
   return scanCount_;
 }
 
-bool BmsBle::scanAndConnect(uint32_t sec, uint8_t attemptOverride){
+// [流程2] 一次完整的“扫描 -> 选设备 -> 连接”业务。main.cpp负责最多调用3轮。\nbool BmsBle::scanAndConnect(uint32_t sec, uint8_t attemptOverride){
   if(connected() && g_bmsData.valid) return true;
 
   if(connected()){
@@ -133,7 +164,7 @@ bool BmsBle::connectDeviceByIndex(uint8_t index){
   return connectByAddress(scanItems_[index].address,scanItems_[index].addressType);
 }
 
-bool BmsBle::connectByAddress(const String& address,uint8_t addressType){
+// [流程3] 按MAC连接，并完成 GATT 服务、读写特征、通知订阅。\nbool BmsBle::connectByAddress(const String& address,uint8_t addressType){
   if(address.length()==0) return false;
 
   NimBLEAddress addr(address.c_str(),addressType);
@@ -255,7 +286,7 @@ void BmsBle::notifyCallback(NimBLERemoteCharacteristic*,uint8_t* d,size_t n,bool
   if(instance_) instance_->handleNotification(d,n);
 }
 
-void BmsBle::handleNotification(const uint8_t* d,size_t n){
+// [流程4] BLE通知入口。这里解决“半帧/多帧/粘包”，再交给协议管理器。\nvoid BmsBle::handleNotification(const uint8_t* d,size_t n){
   Serial.printf("BMS RX notify len=%u: ",(unsigned)n);
   size_t dump=n<24?n:24;
   for(size_t i=0;i<dump;i++) Serial.printf("%02X ",d[i]);
@@ -341,7 +372,7 @@ void BmsBle::request(uint8_t cmd){
   else if(writer->canWrite()) writer->writeValue(f,n,true);
 }
 
-void BmsBle::loop(){
+// [运行期] 连接保持、断线恢复、定时请求。\nvoid BmsBle::loop(){
   if(!connected()){
     g_bmsData.online=false;
 
@@ -373,7 +404,7 @@ bool BmsBle::connected() const{
   return client_ && client_->isConnected();
 }
 
-void BmsBle::releaseConnectionForHotspot(){
+// [释放] 三次失败进入热点前，必须释放 BLE Client 和扫描资源。\nvoid BmsBle::releaseConnectionForHotspot(){
   if(client_){
     if(client_->isConnected()) client_->disconnect();
     NimBLEDevice::deleteClient(client_);
