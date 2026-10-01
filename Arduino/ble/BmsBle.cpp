@@ -72,7 +72,7 @@ uint8_t BmsBle::scanDevices(uint32_t sec){
     scanItems_[scanCount_].address=d->getAddress().toString().c_str();
     scanItems_[scanCount_].addressType=d->getAddressType();
     scanItems_[scanCount_].name=d->getName().c_str();
-    if(scanItems_[scanCount_].name.length()==0) scanItems_[scanCount_].name="JK-BMS";
+    if(scanItems_[scanCount_].name.length()==0) scanItems_[scanCount_].name="BLE";
     scanItems_[scanCount_].rssi=d->getRSSI();
     Serial.printf("JK BLE: %s type=%u RSSI=%d\n",
                   scanItems_[scanCount_].address.c_str(),
@@ -228,14 +228,9 @@ bool BmsBle::connectByAddress(const String& address,uint8_t addressType){
   ttPollCounter_=0;
   lastRequest_=millis()-250;
 
-  request(0x96);
-  delay(100);
-  request(0x97);
-  // ANT-BMS 与 JK 共用常见 FFE0/FFE1 服务；同时发一次 ANT 状态请求，收到 7E A1 后自动切换解析器。
-  delay(100);
-  requestAntStatus();
-  delay(100);
+    // ANT-BMS 与 JK 共用常见 FFE0/FFE1 服务；同时发一次 ANT 状态请求，收到 7E A1 后自动切换解析器。
   requestTtProbe();
+  ttProbeCount_=1;
   lastRequest_=millis();
   return true;
 }
