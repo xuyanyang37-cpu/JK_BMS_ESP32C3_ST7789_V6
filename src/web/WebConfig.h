@@ -14,7 +14,11 @@ private:
   BmsBle* ble_;
   bool active_;
   void handleRoot();
+  void handleProtection();
   void handleStatus();
+  void handleRestart();
+  void handleProtectionSave();
+  void handleProtectionClear();
   void handleScan();
   void handleConnect();
   void handleSave();
