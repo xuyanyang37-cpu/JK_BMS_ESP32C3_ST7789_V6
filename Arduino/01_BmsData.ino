@@ -1,3 +1,11 @@
+// ============================================================
+// BMS 数据模型
+// ESP32-C3 + JK BMS + ST7789
+// ============================================================
+
+#define JK_MAX_CELLS 32
+#define BMS_SCAN_RESULT_MAX 20
+
 enum BmsBootState {
   BOOT_START = 0,
   BOOT_SCANNING = 1,
@@ -33,5 +41,5 @@ struct BmsData {
 
 extern BmsData g_bmsData;
 
-// 全局 BMS 数据实例；各模块通过 extern BmsData g_bmsData 共享。
+// 全局 BMS 数据实例
 BmsData g_bmsData;
