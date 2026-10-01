@@ -167,14 +167,21 @@ bool BmsBle::connectByAddress(const String& address,uint8_t addressType){
     return false;
   }
 
+  // JK 常见实现中 FFE1/FFE2 的读写方向并不完全一致。
+  // 不再把 UUID 强行绑定为 write/notify，而是根据实际 BLE 属性选择。
   NimBLERemoteCharacteristic* ffe1=s->getCharacteristic(NimBLEUUID(WRITE_CHAR));
   NimBLERemoteCharacteristic* ffe2=s->getCharacteristic(NimBLEUUID(NOTIFY_CHAR));
 
-  writeCh_=nullptr; notifyCh_=nullptr;
-  if(ffe1 && (ffe1->canWriteNoResponse() || ffe1->canWrite())) writeCh_=ffe1;
-  if(ffe1 && (ffe1->canNotify() || ffe1->canIndicate())) notifyCh_=ffe1;
-  if(!notifyCh_ && ffe2 && (ffe2->canNotify() || ffe2->canIndicate())) notifyCh_=ffe2;
-  if(!writeCh_ && ffe2 && (ffe2->canWriteNoResponse() || ffe2->canWrite())) writeCh_=ffe2;
+  writeCh_=nullptr;
+  notifyCh_=nullptr;
+
+  NimBLERemoteCharacteristic* chars[2]={ffe1,ffe2};
+  for(int i=0;i<2;i++){
+    NimBLERemoteCharacteristic* c=chars[i];
+    if(!c) continue;
+    if(!writeCh_ && (c->canWriteNoResponse() || c->canWrite())) writeCh_=c;
+    if(!notifyCh_ && (c->canNotify() || c->canIndicate())) notifyCh_=c;
+  }
 
   Serial.printf("JK BLE chars: FFE1 write=%d notify=%d; FFE2 write=%d notify=%d\n",
                 ffe1 ? (int)(ffe1->canWriteNoResponse() || ffe1->canWrite()) : 0,
@@ -271,7 +278,20 @@ void BmsBle::handleNotification(const uint8_t* d,size_t n){
       if(len<4) break;
     }
 
-    size_t expected=protocolManager_.expectedFrameLength();
+    // JK 4E57 是变长帧：长度字段位于 byte[2..3]。
+    // 旧 JK 55AAEB90 / 其他固定协议继续按固定长度处理。
+    size_t expected=protocolManager_.frameLength(rx,len);
+    if(expected==0){
+      // 已经找到帧头，但长度字段还不完整或异常，等待下一次 Notify。
+      break;
+    }
+
+    if(expected>sizeof(rx)){
+      Serial.printf("BMS RX: frame too large (%u), reset\\n",(unsigned)expected);
+      len=0;
+      break;
+    }
+
     if(len>=expected){
       if(protocolManager_.parseFrame(rx,expected,g_bmsData)) g_bmsData.online=true;
       memmove(rx,rx+expected,len-expected);
