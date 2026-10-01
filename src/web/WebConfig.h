@@ -21,6 +21,5 @@ private:
   void handleNotFound();
   String jsonEscape(const String& s);
   String makeStatusJson();
-  String makePage();
 };
 #endif
