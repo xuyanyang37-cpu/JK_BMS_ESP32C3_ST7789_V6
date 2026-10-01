@@ -33,6 +33,22 @@ bool BmsProtocolManager::isProtocol32S() const {
   return jkProtocol_.isProtocol32S();
 }
 
+bool BmsProtocolManager::setPreferredProtocol(const String& name) {
+  String n=name;
+  n.trim();
+  n.toUpperCase();
+  if(n=="JK") { activeProtocol_=&jkProtocol_; return true; }
+  if(n=="ANT") { activeProtocol_=&antProtocol_; return true; }
+  if(n=="JBD") { activeProtocol_=&jbdProtocol_; return true; }
+  if(n=="DALY") { activeProtocol_=&dalyProtocol_; return true; }
+  if(n=="TT" || n=="IRON_TOWER") { activeProtocol_=&ttProtocol_; return true; }
+  return false;
+}
+
+const char* BmsProtocolManager::preferredProtocolName() const {
+  return activeProtocol_ ? activeProtocol_->name() : "NONE";
+}
+
 // [分支] 按顺序尝试识别协议。第一个能处理该帧的协议获胜。\nBmsProtocol* BmsProtocolManager::detectProtocol(const uint8_t* d,size_t n) {
   if (jkProtocol_.canHandle(d,n)) return &jkProtocol_;
   if (antProtocol_.canHandle(d,n)) return &antProtocol_;
