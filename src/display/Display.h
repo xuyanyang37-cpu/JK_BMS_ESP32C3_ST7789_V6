@@ -4,6 +4,7 @@
 #include "../tft_setup.h"
 #include <TFT_eSPI.h>
 #include "../BmsData.h"
+#include "DisplayConfig.h"
 
 class Display {
 public:
@@ -34,6 +35,8 @@ private:
   void drawTemperature(const BmsData& d);
   void drawRange(const BmsData& d);
   void drawSocBar(const BmsData& d);
+  void drawConfiguredRow(uint8_t index, const BmsData& d);
+  bool metricChanged(uint8_t metric, const BmsData& a, const BmsData& b) const;
 
   bool changed(float a, float b, float eps) const;
 };
