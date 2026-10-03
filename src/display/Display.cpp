@@ -168,6 +168,8 @@ void Display::update(const BmsData& d) {
   }
 
   if (displayConfigChanged()) {
+    // 网页保存后无需重启：重新绘制受配置影响的局部区域。
+    drawSoc(d);
     drawConfiguredRow(0, d);
     drawConfiguredRow(1, d);
     drawConfiguredRow(2, d);
@@ -452,7 +454,9 @@ void Display::drawSoc(const BmsData& d) {
   drawPanel(socSprite_, 0, 0, 140, 109);
 
   String value = String(d.soc, 0);
-  // SOC颜色由网页配置决定；低电量的数值判断仍保留在业务层，\n  // 如果以后需要“低电量自动变红”，可以在这里叠加阈值规则。\n  uint16_t color = g_displayConfig.socColor;
+  // SOC颜色由网页配置决定；低电量的数值判断仍保留在业务层，
+  // 如果以后需要“低电量自动变红”，可以在这里叠加阈值规则。
+  uint16_t color = g_displayConfig.socColor;
 
   socSprite_.setTextColor(color, UI_PANEL);
   socSprite_.drawCentreString(value, 68, 20, 7);
@@ -474,24 +478,27 @@ void Display::drawTemperature(const BmsData& d) {
   leftInfoSprite_.fillRoundRect(72, 0, 68, 36, 7, UI_PANEL);
 
   // 温度卡片：小标题 + 数值。
+  const uint16_t tempColor = g_displayConfig.tempColor;
+  const uint16_t capacityColor = g_displayConfig.capacityColor;
+
   FontGB2312::drawText(leftInfoSprite_, 5, 3,
-                       "温度", UI_TEMP, UI_PANEL, 1);
+                       "温度", tempColor, UI_PANEL, 1);
   FontGB2312::drawText(leftInfoSprite_, 6, 3,
-                       "温度", UI_TEMP, UI_PANEL, 1);
+                       "温度", tempColor, UI_PANEL, 1);
 
   String temp = String(d.temperature1, 0) + "C";
-  leftInfoSprite_.setTextColor(UI_TEMP, UI_PANEL);
+  leftInfoSprite_.setTextColor(tempColor, UI_PANEL);
   leftInfoSprite_.drawCentreString(temp, 34, 15, 2);
   leftInfoSprite_.drawCentreString(temp, 35, 15, 2);
 
   // 容量卡片：小标题 + 剩余容量。
   FontGB2312::drawText(leftInfoSprite_, 77, 3,
-                       "容量", UI_WHITE, UI_PANEL, 1);
+                       "容量", capacityColor, UI_PANEL, 1);
   FontGB2312::drawText(leftInfoSprite_, 78, 3,
                        "容量", UI_WHITE, UI_PANEL, 1);
 
   String cap = String(d.remainingCapacityAh, 1) + "Ah";
-  leftInfoSprite_.setTextColor(UI_WHITE, UI_PANEL);
+  leftInfoSprite_.setTextColor(capacityColor, UI_PANEL);
   leftInfoSprite_.drawCentreString(cap, 106, 15, 2);
   leftInfoSprite_.drawCentreString(cap, 107, 15, 2);
 
@@ -511,7 +518,16 @@ bool Display::displayConfigChanged() const {
          g_displayConfig.socBar != lastDisplayConfig_.socBar;
 }
 
-/*\n * 根据“当前网页选择的指标”判断该指标是否发生变化。\n * 这样 Display 不需要每次刷新四个框，而是只刷新真正发生变化的框。\n * 参数：a=本次BmsData，b=上一次BmsData。\n */\nbool Display::metricChanged(uint8_t metric, const BmsData& a, const BmsData& b) const {
+/*
+ * 根据“当前网页选择的指标”判断该指标是否发生变化。
+ * 这样 Display 不需要每次刷新四个框，而是只刷新真正发生变化的框。
+ * 参数：a=本次BmsData，b=上一次BmsData。
+ */
+/*
+ * 根据当前网页选择的指标判断数据是否发生变化。
+ * 只有对应指标变化时才刷新该行，避免每500ms重复绘制。
+ */
+bool Display::metricChanged(uint8_t metric, const BmsData& a, const BmsData& b) const {
   switch (metric) {
     case DISPLAY_VOLTAGE: return changed(a.totalVoltage, b.totalVoltage, 0.01f);
     case DISPLAY_CURRENT: return changed(a.current, b.current, 0.01f);
@@ -538,7 +554,17 @@ bool Display::displayConfigChanged() const {
   }
 }
 
-/*\n * 将网页配置中的一个指标转换成固定右侧行。\n * index 0~3 对应 y=4/42/80/118，屏幕结构永远不改变。\n * 这里只负责“取值+格式化+局部推屏”，不修改BmsData。\n */\nvoid Display::drawConfiguredRow(uint8_t index, const BmsData& d) {
+/*
+ * 将网页配置中的一个指标转换成固定右侧行。
+ * index 0~3 对应 y=4/42/80/118，屏幕结构永远不改变。
+ * 这里只负责“取值+格式化+局部推屏”，不修改BmsData。
+ */
+/*
+ * 将一个网页配置指标转换为固定位置的右侧数据框。
+ * index=0/1/2/3，对应屏幕Y=4/42/80/118。
+ * 布局固定，网页只能改变内容、颜色和字体。
+ */
+void Display::drawConfiguredRow(uint8_t index, const BmsData& d) {
   if(index >= 4) return;
   const DisplayRowConfig& cfg = g_displayConfig.row[index];
   String label = displayMetricName(cfg.metric);
