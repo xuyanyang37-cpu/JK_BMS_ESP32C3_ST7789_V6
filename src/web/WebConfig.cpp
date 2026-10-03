@@ -81,7 +81,8 @@ input,select{padding:11px;margin:5px 0;width:100%;border-radius:8px;border:1px s
 async function api(url,opt){return await (await fetch(url,opt)).json();}
 let statusBusy=false;
 async function status(){
-  if(statusBusy)return;\n  statusBusy=true;
+  if(statusBusy)return;
+  statusBusy=true;
   try{
     let s=await api('/api/status');
     document.getElementById('status').innerHTML=
@@ -140,7 +141,9 @@ String WebConfig::jsonEscape(const String& s){
     char c=s[i];
     if(c=='"') o+="\\\"";
     else if(c=='\\') o+="\\\\";
-    else if(c=='\n') o+="\\n";
+    else if(c=='
+') o+="\
+";
     else if(c=='\r') o+="\\r";
     else if(c=='\t') o+="\\t";
     else o+=c;
@@ -174,7 +177,8 @@ String WebConfig::makeStatusJson(){
   return j+"}";
 }
 
-// [网页流程1] 启动WebServer并注册所有HTTP接口。\nvoid WebConfig::begin(BmsBle* ble){
+// [网页流程1] 启动WebServer并注册所有HTTP接口。
+void WebConfig::begin(BmsBle* ble){
   // 只初始化一次。热点模式下不要重复注册 WebServer 路由，
   // 否则会不断创建回调对象并造成堆碎片。
   if(active_) return;
@@ -206,7 +210,8 @@ String WebConfig::makeStatusJson(){
   server_.begin();
 }
 
-// [网页流程2] 每次主循环处理一次HTTP请求。\nvoid WebConfig::loop(){
+// [网页流程2] 每次主循环处理一次HTTP请求。
+void WebConfig::loop(){
   if(active_) server_.handleClient();
 }
 
@@ -330,11 +335,13 @@ void WebConfig::handleDisplayStatus(){
   server_.send(200,"application/json; charset=utf-8",j);
 }
 
-// [接口] 返回当前BMS状态，前端定时刷新。\nvoid WebConfig::handleStatus(){
+// [接口] 返回当前BMS状态，前端定时刷新。
+void WebConfig::handleStatus(){
   server_.send(200,"application/json; charset=utf-8",makeStatusJson());
 }
 
-// [接口] 网页手动扫描BLE设备。\nvoid WebConfig::handleScan(){
+// [接口] 网页手动扫描BLE设备。
+void WebConfig::handleScan(){
   if(!ble_){
     server_.send(500,"application/json","{\"message\":\"BLE未初始化\",\"items\":[]}");
     return;
@@ -351,7 +358,8 @@ void WebConfig::handleDisplayStatus(){
   server_.send(200,"application/json; charset=utf-8",j);
 }
 
-// [接口] 网页选择扫描结果后按index连接。\nvoid WebConfig::handleConnect(){
+// [接口] 网页选择扫描结果后按index连接。
+void WebConfig::handleConnect(){
   if(!ble_){
     server_.send(500,"application/json","{\"message\":\"BLE未初始化\"}");
     return;
@@ -380,7 +388,8 @@ void WebConfig::handleDisplayStatus(){
   server_.send(ok?200:500,"application/json; charset=utf-8",j);
 }
 
-// [接口] 保存MAC、24S/32S和Wh/km到Preferences。\nvoid WebConfig::handleSave(){
+// [接口] 保存MAC、24S/32S和Wh/km到Preferences。
+void WebConfig::handleSave(){
   if(!ble_){
     server_.send(500,"application/json","{\"message\":\"BLE未初始化\"}");
     return;
