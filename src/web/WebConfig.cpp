@@ -193,6 +193,7 @@ String WebConfig::makeStatusJson(){
   server_.on("/",HTTP_GET,[this](){handleRoot();});
   server_.on("/protection",HTTP_GET,[this](){handleProtection();});
   server_.on("/display",HTTP_GET,[this](){handleDisplay();});
+  server_.on("/api/display",HTTP_GET,[this](){handleDisplayStatus();});
   server_.on("/api/status",HTTP_GET,[this](){handleStatus();});
   server_.on("/api/scan",HTTP_GET,[this](){handleScan();});
   server_.on("/api/connect",HTTP_GET,[this](){handleConnect();});
@@ -312,8 +313,8 @@ load();setInterval(load,2000);
   server_.send_P(200,"text/html; charset=utf-8",PAGE);
 }
 
-// [接口] 返回屏幕显示配置。
-void WebConfig::handleDisplay(){
+// [接口] 返回屏幕显示配置 JSON。
+void WebConfig::handleDisplayStatus(){
   String j="{\"row\":[";
   for(uint8_t i=0;i<4;i++){
     if(i) j+=",";
