@@ -17,6 +17,7 @@ private:
   void handleRoot();
   void handleProtection();
   void handleDisplay();
+  void handleDisplayStatus();
   void handleStatus();
   void handleRestart();
   void handleProtectionSave();
