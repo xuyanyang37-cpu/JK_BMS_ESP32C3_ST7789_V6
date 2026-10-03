@@ -452,7 +452,7 @@ void Display::drawSoc(const BmsData& d) {
   drawPanel(socSprite_, 0, 0, 140, 109);
 
   String value = String(d.soc, 0);
-  uint16_t color = socColor(d.soc);
+  // SOC颜色由网页配置决定；低电量的数值判断仍保留在业务层，\n  // 如果以后需要“低电量自动变红”，可以在这里叠加阈值规则。\n  uint16_t color = g_displayConfig.socColor;
 
   socSprite_.setTextColor(color, UI_PANEL);
   socSprite_.drawCentreString(value, 68, 20, 7);
@@ -511,7 +511,7 @@ bool Display::displayConfigChanged() const {
          g_displayConfig.socBar != lastDisplayConfig_.socBar;
 }
 
-bool Display::metricChanged(uint8_t metric, const BmsData& a, const BmsData& b) const {
+/*\n * 根据“当前网页选择的指标”判断该指标是否发生变化。\n * 这样 Display 不需要每次刷新四个框，而是只刷新真正发生变化的框。\n * 参数：a=本次BmsData，b=上一次BmsData。\n */\nbool Display::metricChanged(uint8_t metric, const BmsData& a, const BmsData& b) const {
   switch (metric) {
     case DISPLAY_VOLTAGE: return changed(a.totalVoltage, b.totalVoltage, 0.01f);
     case DISPLAY_CURRENT: return changed(a.current, b.current, 0.01f);
@@ -538,7 +538,7 @@ bool Display::metricChanged(uint8_t metric, const BmsData& a, const BmsData& b) 
   }
 }
 
-void Display::drawConfiguredRow(uint8_t index, const BmsData& d) {
+/*\n * 将网页配置中的一个指标转换成固定右侧行。\n * index 0~3 对应 y=4/42/80/118，屏幕结构永远不改变。\n * 这里只负责“取值+格式化+局部推屏”，不修改BmsData。\n */\nvoid Display::drawConfiguredRow(uint8_t index, const BmsData& d) {
   if(index >= 4) return;
   const DisplayRowConfig& cfg = g_displayConfig.row[index];
   String label = displayMetricName(cfg.metric);
