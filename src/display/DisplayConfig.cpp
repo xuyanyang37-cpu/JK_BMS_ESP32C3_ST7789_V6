@@ -1,4 +1,5 @@
 #include "DisplayConfig.h"
+#include <TFT_eSPI.h>
 #include <Preferences.h>
 
 DisplayConfig g_displayConfig;
