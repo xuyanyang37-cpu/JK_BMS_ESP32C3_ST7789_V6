@@ -164,8 +164,19 @@ namespace {
     return;
   }
 
-  drawDashboard(d, firstDashboard_);
+  if (displayConfigChanged()) {
+    drawConfiguredRow(0, d);
+    drawConfiguredRow(1, d);
+    drawConfiguredRow(2, d);
+    drawConfiguredRow(3, d);
+    drawTemperature(d);
+    if (g_displayConfig.socBar) drawSocBar(d);
+    lastDisplayConfig_ = g_displayConfig;
+  } else {
+    drawDashboard(d, firstDashboard_);
+  }
   firstDashboard_ = false;
+  lastDisplayConfig_ = g_displayConfig;
   lastData_ = d;
 }
 
@@ -245,6 +256,7 @@ void Display::drawFullPage(const BmsData& d) {
   tft_.fillScreen(TFT_BLACK);
   firstDashboard_ = (d.online || d.bootState == BOOT_CONNECTED);
   g_displayConfig.load();
+  lastDisplayConfig_ = g_displayConfig;
 
   if (d.bootState == BOOT_SCANNING ||
       d.bootState == BOOT_START) {
@@ -481,6 +493,18 @@ void Display::drawTemperature(const BmsData& d) {
 
   // 局部刷新：只覆盖左下 140x36 区域。
   leftInfoSprite_.pushSprite(4, 118);
+}
+
+bool Display::displayConfigChanged() const {
+  for(uint8_t i=0;i<4;i++){
+    if(g_displayConfig.row[i].metric != lastDisplayConfig_.row[i].metric ||
+       g_displayConfig.row[i].color != lastDisplayConfig_.row[i].color ||
+       g_displayConfig.row[i].font != lastDisplayConfig_.row[i].font) return true;
+  }
+  return g_displayConfig.socColor != lastDisplayConfig_.socColor ||
+         g_displayConfig.tempColor != lastDisplayConfig_.tempColor ||
+         g_displayConfig.capacityColor != lastDisplayConfig_.capacityColor ||
+         g_displayConfig.socBar != lastDisplayConfig_.socBar;
 }
 
 bool Display::metricChanged(uint8_t metric, const BmsData& a, const BmsData& b) const {
