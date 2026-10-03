@@ -24,6 +24,8 @@ private:
   BmsBootState lastBootState_ = BOOT_START;
 
   BmsData lastData_{};
+  DisplayConfig lastDisplayConfig_{};
+  bool displayConfigChanged() const;
 
   void drawFullPage(const BmsData& d);
   void drawScanningScreen(const BmsData& d, bool force);
