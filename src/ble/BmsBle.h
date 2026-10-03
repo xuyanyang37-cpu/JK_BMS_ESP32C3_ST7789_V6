@@ -25,6 +25,8 @@ public:
   bool connected() const;
   void releaseConnectionForHotspot();
   void loop();
+  // setup()完成首次有效连接后调用，之后断线恢复才启用“连续3次失败进入热点”。
+  void setRuntimeRecoveryEnabled(bool enable){ runtimeRecoveryEnabled_=enable; }
 
   uint8_t getScanCount() const { return scanCount_; }
   const BmsScanItem& getScanItem(uint8_t i) const { return scanItems_[i]; }
@@ -47,6 +49,9 @@ private:
   uint8_t counter_;
   uint32_t lastRequest_;
   uint32_t lastReconnectAttempt_;
+  uint32_t recoveryVerifyStart_;
+  uint8_t recoveryFailures_;
+  bool runtimeRecoveryEnabled_;
   uint8_t scanCount_;
   uint8_t scanAttempt_;
   uint8_t configuredAddressType_;
