@@ -481,7 +481,9 @@ void BmsBle::loop(){
     if(runtimeRecoveryEnabled_ && g_bmsData.bootState!=BOOT_HOTSPOT &&
        now-lastReconnectAttempt_>=5000UL){
       lastReconnectAttempt_=now;
-      uint8_t reconnectAttempt=scanAttempt_;
+      // 运行期恢复次数必须使用 recoveryFailures_，不能复用启动扫描计数。
+      // 否则启动阶段已经扫描到第3次后，运行期第一次断线恢复也会显示为3/3。
+      uint8_t reconnectAttempt=(uint8_t)(recoveryFailures_+1);
       if(reconnectAttempt<1 || reconnectAttempt>3) reconnectAttempt=1;
 
       Serial.printf("BLE RECOVERY: attempt %u/3, previous failures=%u\\n",
