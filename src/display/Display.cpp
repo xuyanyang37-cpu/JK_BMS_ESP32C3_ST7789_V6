@@ -89,11 +89,13 @@ namespace {
   }
 }
 
-// [显示辅助] 只有数值变化达到阈值才刷新对应区域，减少闪烁。\nbool Display::changed(float a, float b, float eps) const {
+// [显示辅助] 只有数值变化达到阈值才刷新对应区域，减少闪烁。
+bool Display::changed(float a, float b, float eps) const {
   return fabsf(a - b) >= eps;
 }
 
-// [显示流程1] ST7789初始化 -> Sprite创建 -> 开启背光 -> 首次整屏绘制。\nvoid Display::begin() {
+// [显示流程1] ST7789初始化 -> Sprite创建 -> 开启背光 -> 首次整屏绘制。
+void Display::begin() {
   // ST7789 初始化期间保持背光关闭，避免初始化过程中的白屏/闪屏。
   pinMode(TFT_BL, OUTPUT);
   digitalWrite(TFT_BL, LOW);
@@ -127,7 +129,8 @@ namespace {
   drawFullPage(g_bmsData);
 }
 
-// [显示流程2] 主循环每500ms调用。这里决定“整屏画”还是“局部刷新”。\nvoid Display::update(const BmsData& d) {
+// [显示流程2] 主循环每500ms调用。这里决定“整屏画”还是“局部刷新”。
+void Display::update(const BmsData& d) {
   if (!initialized_) return;
 
   // 扫描阶段单独处理：
