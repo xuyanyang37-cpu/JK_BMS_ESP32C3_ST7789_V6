@@ -161,12 +161,30 @@ bool BmsBle::isCandidate(const NimBLEAdvertisedDevice* d) const{
   else { scanAttempt_++; if(scanAttempt_>3) scanAttempt_=3; }
 
   g_bmsData.scanAttempt=scanAttempt_;
+
+  // ================================================================
+  // 快速路径：已经保存MAC时，先直接连接保存设备。
+  // 这样正常使用时不必每次上电先完整扫描3秒。
+  //
+  // 失败后再进入扫描路径：
+  //   保存MAC直连失败
+  //        ↓
+  //   扫描附近候选设备
+  //        ↓
+  //   选择RSSI最强设备
+  // ================================================================
+  if(configuredAddress_.length()){
+    setStatus(BOOT_CONNECTING,"连接已保存BMS");
+    Serial.printf("BLE FAST CONNECT: %s type=%u\\n",
+                  configuredAddress_.c_str(),configuredAddressType_);
+    if(connectByAddress(configuredAddress_,configuredAddressType_))
+      return true;
+
+    Serial.println("BLE FAST CONNECT: saved device failed, fallback to scan.");
+  }
+
   setStatus(BOOT_SCANNING,"扫描蓝牙电池 "+String(scanAttempt_)+"/3");
   scanDevices(sec);
-
-  if(configuredAddress_.length()){
-    if(connectByAddress(configuredAddress_,configuredAddressType_)) return true;
-  }
 
   if(scanCount_==0){
     setStatus(BOOT_SCANNING,"第 "+String(scanAttempt_)+"/3 次未找到JK电池");
