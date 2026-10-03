@@ -419,13 +419,14 @@ void Display::drawDashboard(const BmsData& d, bool force) {
     drawConfiguredRow(2, d);
     drawConfiguredRow(3, d);
     drawTemperature(d);
-    drawSocBar(d);
+    if (g_displayConfig.socBar) drawSocBar(d);
     return;
   }
 
   if (changed(d.soc, lastData_.soc, 0.5f)) {
     drawSoc(d);
-    drawSocBar(d);
+    if (g_displayConfig.socBar) drawSocBar(d);
+    else tft_.fillRect(4, 156, 312, 14, TFT_BLACK);
   }
 
   for (uint8_t i = 0; i < 4; ++i) {
