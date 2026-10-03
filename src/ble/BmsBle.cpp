@@ -225,6 +225,10 @@ bool BmsBle::connectDeviceByIndex(uint8_t index){
     return false;
   }
 
+  // 与 dionipe/jk-bms-esp32-cyd 的 JK 连接参数保持一致：
+  // interval=12, latency=12, supervision timeout=0, connection timeout=51。
+  // 这样避免 V6 在 GATT 建链阶段与已验证的 JK 实现出现连接参数差异。
+  client_->setConnectionParams(12,12,0,51);
   client_->setConnectTimeout(5000);
   if(!client_->connect(addr)){
     setStatus(BOOT_SCANNING,"连接失败");
@@ -312,26 +316,33 @@ bool BmsBle::connectDeviceByIndex(uint8_t index){
   g_bmsData.statusMessage="已连接JK电池";
   g_bmsData.scanAttempt=scanAttempt_;
 
-  // 根据“已保存协议”选择首次请求。
-  // JK/ANT/TT 已经保存时，不再混发其它协议命令，减少误探测和无效流量。
+  // --------------------------------------------------------------
+  // JK 初始化流程严格按 dionipe/jk-bms-esp32-cyd 的连接顺序：
+  //   subscribe -> 等待1000ms -> DEV_INFO(0x97) -> 等待800ms
+  //   -> CELL_INFO(0x96) -> 等待800ms
+  //
+  // 0x97 / 0x96 的实际20字节帧由 JkProtocol::buildCommand() 生成，
+  // BLE 层不再自己拼协议帧，保持 V6 的模块化架构。
+  //
+  // ANT/TT 只有在已经保存并锁定对应协议时才发送自己的查询，
+  // 避免连接 JK 后同时混发三套协议。
+  // --------------------------------------------------------------
   String proto=String(protocolManager_.protocolName());
+  delay(1000);  // dionipe: subscribe 后给 BMS 1 秒稳定时间
+
   if(proto=="ANT"){
     requestAntStatus();
   } else if(proto=="TT"){
     request(0x03);
   } else if(proto=="JBD" || proto=="DALY"){
-    // 当前项目对应协议的 buildCommand() 决定是否支持实际查询。
-    // 不支持时不会发送伪造的 JK/ANT/TT 指令。
     request(0x03);
   } else {
-    // 默认/未锁定协议仍使用兼容探测：JK -> ANT -> TT。
-    request(0x96);
-    delay(100);
+    // JK：设备信息 -> 电芯/实时信息。
+    // dionipe 的 CMD_DEV_INFO = 0x97，CMD_CELL_INFO = 0x96。
     request(0x97);
-    delay(100);
-    requestAntStatus();
-    delay(100);
-    requestTtProbe();
+    delay(800);
+    request(0x96);
+    delay(800);
   }
   lastRequest_=millis();
   return true;
@@ -552,6 +563,7 @@ void BmsBle::loop(){
   } else if(proto=="ANT"){
     if(now-lastRequest_>=2000){ requestAntStatus(); lastRequest_=now; }
   } else if(proto=="JK"){
+    // 与 dionipe 的常规 JK polling 保持一致：继续请求 CELL_INFO(0x96)。
     if(now-lastRequest_>=5000){ request(0x96); lastRequest_=now; }
   } else if(proto=="JBD" || proto=="DALY"){
     if(now-lastRequest_>=2000){ request(0x03); lastRequest_=now; }
