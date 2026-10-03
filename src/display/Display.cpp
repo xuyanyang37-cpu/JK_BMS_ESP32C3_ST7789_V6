@@ -8,8 +8,8 @@
  *
  * 主界面：
  *   左：SOC
- *   左下：温度 / 单体压差 + 剩余容量
- *   右：电压 / 电流 / 功率 / 剩余里程
+ *   左下：温度 / 剩余容量
+ *   右：电压 / 电流 / 最低电压 / 剩余里程
  *   底：SOC 渐变条
  *
  * 主界面只显示电池运行数据，不显示连接状态文字。
@@ -23,7 +23,7 @@ namespace {
   static const uint16_t UI_WHITE   = TFT_WHITE;
   static const uint16_t UI_VOLTAGE = 0xFFE0; // 明黄色
   static const uint16_t UI_CURRENT = 0x07E0; // 亮绿色
-  static const uint16_t UI_POWER   = 0xFCA8; // 柔和红色
+  static const uint16_t UI_MIN_VOLTAGE = 0xFCA8; // 柔和红色
   static const uint16_t UI_RANGE   = 0x2F3C; // 青色
   static const uint16_t UI_TEMP    = 0x07E0;
 
@@ -70,7 +70,7 @@ namespace {
     sprite.fillSprite(TFT_BLACK);
     sprite.fillRoundRect(0, 0, 168, 36, 7, UI_PANEL);
 
-    // 右侧四项统一放大，尽量填满 28px 高的卡片。
+    // 右侧四项统一布局：电压、电流、最低电压、剩余里程。
     sprite.drawCircle(15, 14, 11, color);
     sprite.setTextColor(color, UI_PANEL);
     sprite.drawCentreString(String(icon), 15, 5, 2);
@@ -401,7 +401,7 @@ void Display::drawDashboard(const BmsData& d, bool force) {
     drawSoc(d);
     drawVoltage(d);
     drawCurrent(d);
-    drawPower(d);
+    drawMinVoltage(d);
     drawTemperature(d);
     drawRange(d);
     drawSocBar(d);
@@ -421,8 +421,8 @@ void Display::drawDashboard(const BmsData& d, bool force) {
     drawCurrent(d);
   }
 
-  if (changed(d.power, lastData_.power, 1.0f)) {
-    drawPower(d);
+  if (changed(d.minCellVoltage, lastData_.minCellVoltage, 0.001f)) {
+    drawMinVoltage(d);
   }
 
   if (changed(d.remainingCapacityAh, lastData_.remainingCapacityAh, 0.1f) ||
@@ -457,27 +457,35 @@ void Display::drawSoc(const BmsData& d) {
 
 void Display::drawTemperature(const BmsData& d) {
   leftInfoSprite_.fillSprite(TFT_BLACK);
-  // 温度/容量区高度与右侧“剩余里程”一致，避免原来的 67px 大块占屏。
-  // 两个小卡片宽度合计 140px，与 SOC 主卡片一致。
+
+  // 左下只放“温度 + 容量”，整体高度 36px。
+  // 该区域顶部 y=118，与右侧第四行“剩余里程”完全对齐。
   leftInfoSprite_.fillRoundRect(0, 0, 68, 36, 7, UI_PANEL);
   leftInfoSprite_.fillRoundRect(72, 0, 68, 36, 7, UI_PANEL);
 
+  // 温度卡片：小标题 + 数值。
+  FontGB2312::drawText(leftInfoSprite_, 5, 3,
+                       "温度", UI_TEMP, UI_PANEL, 1);
+  FontGB2312::drawText(leftInfoSprite_, 6, 3,
+                       "温度", UI_TEMP, UI_PANEL, 1);
+
   String temp = String(d.temperature1, 0) + "C";
-  String delta = String(d.deltaCellVoltage * 1000.0f, 0) + "mV";
-
   leftInfoSprite_.setTextColor(UI_TEMP, UI_PANEL);
-  leftInfoSprite_.drawString(temp, 4, 10, 2);
-  leftInfoSprite_.drawString(temp, 5, 10, 2);
-  leftInfoSprite_.drawString(delta, 34, 10, 2);
-  leftInfoSprite_.drawString(delta, 35, 10, 2);
+  leftInfoSprite_.drawCentreString(temp, 34, 15, 2);
+  leftInfoSprite_.drawCentreString(temp, 35, 15, 2);
 
+  // 容量卡片：小标题 + 剩余容量。
+  FontGB2312::drawText(leftInfoSprite_, 77, 3,
+                       "容量", UI_WHITE, UI_PANEL, 1);
+  FontGB2312::drawText(leftInfoSprite_, 78, 3,
+                       "容量", UI_WHITE, UI_PANEL, 1);
+
+  String cap = String(d.remainingCapacityAh, 1) + "Ah";
   leftInfoSprite_.setTextColor(UI_WHITE, UI_PANEL);
-  leftInfoSprite_.drawCentreString("Ah", 87, 3, 1);
+  leftInfoSprite_.drawCentreString(cap, 106, 15, 2);
+  leftInfoSprite_.drawCentreString(cap, 107, 15, 2);
 
-  String cap = String(d.remainingCapacityAh, 1);
-  leftInfoSprite_.drawCentreString(cap, 119, 9, 2);
-  leftInfoSprite_.drawCentreString(cap, 120, 9, 2);
-
+  // 局部刷新：只覆盖左下 140x36 区域。
   leftInfoSprite_.pushSprite(4, 118);
 }
 
@@ -495,10 +503,11 @@ void Display::drawCurrent(const BmsData& d) {
   rowSprite_.pushSprite(148, 42);
 }
 
-void Display::drawPower(const BmsData& d) {
-  drawMetricRow(rowSprite_, 'W', "功率",
-                String(d.power, 0) + "W",
-                UI_POWER);
+void Display::drawMinVoltage(const BmsData& d) {
+  // 第三行按实物仪表布局显示“最低电压”，不再显示功率。
+  drawMetricRow(rowSprite_, 'V', "最低",
+                String(d.minCellVoltage, 3) + "V",
+                UI_MIN_VOLTAGE);
   rowSprite_.pushSprite(148, 80);
 }
 
