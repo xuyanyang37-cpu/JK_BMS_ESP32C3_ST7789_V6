@@ -425,12 +425,12 @@ void WebConfig::handleDisplayStatus(){
 void WebConfig::handleDisplaySave(){
   for(uint8_t i=0;i<4;i++){
     String mk="m"+String(i), ck="c"+String(i), fk="f"+String(i);
-    if(server_.hasArg(mk)) g_displayConfig.row[i].metric=(uint8_t)server_.arg(mk).toInt();
-    if(server_.hasArg(fk)) g_displayConfig.row[i].font=(uint8_t)server_.arg(fk).toInt();
+    if(server_.hasArg(mk.c_str())) g_displayConfig.row[i].metric=(uint8_t)server_.arg(mk.c_str()).toInt();
+    if(server_.hasArg(fk.c_str())) g_displayConfig.row[i].font=(uint8_t)server_.arg(fk.c_str()).toInt();
     if(g_displayConfig.row[i].metric>DISPLAY_CYCLE_COUNT) g_displayConfig.row[i].metric=DISPLAY_VOLTAGE;
     if(g_displayConfig.row[i].font<2 || g_displayConfig.row[i].font>4) g_displayConfig.row[i].font=4;
-    if(server_.hasArg(ck)){
-      String s=server_.arg(ck); s.trim();
+    if(server_.hasArg(ck.c_str())){
+      String s=server_.arg(ck.c_str()); s.trim();
       if(s.length()==7 && s[0]=='#'){
         long n=strtol(s.c_str()+1,nullptr,16);
         uint8_t r=(n>>16)&255, g=(n>>8)&255, b=n&255;
