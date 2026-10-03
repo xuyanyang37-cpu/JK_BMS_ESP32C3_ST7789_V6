@@ -30,7 +30,7 @@ private:
   void drawSoc(const BmsData& d);
   void drawVoltage(const BmsData& d);
   void drawCurrent(const BmsData& d);
-  void drawPower(const BmsData& d);
+  void drawMinVoltage(const BmsData& d);
   void drawTemperature(const BmsData& d);
   void drawRange(const BmsData& d);
   void drawSocBar(const BmsData& d);
