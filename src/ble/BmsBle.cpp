@@ -43,7 +43,8 @@ static bool g_legacyAckSeen=false;
 
 BmsBle::BmsBle()
   : client_(nullptr),ch_(nullptr),writeCh_(nullptr),notifyCh_(nullptr),
-    counter_(0),lastRequest_(0),lastReconnectAttempt_(0),
+    counter_(0),lastRequest_(0),lastReconnectAttempt_(0),recoveryVerifyStart_(0),
+    recoveryFailures_(0),runtimeRecoveryEnabled_(false),
     scanCount_(0),scanAttempt_(0),configuredAddressType_(BLE_ADDR_PUBLIC),
     protocol32S_(true),configuredAddress_("") {
   instance_=this;
@@ -293,15 +294,22 @@ bool BmsBle::connectDeviceByIndex(uint8_t index){
   g_bmsData.statusMessage="已连接JK电池";
   g_bmsData.scanAttempt=scanAttempt_;
 
-  // 根据已保存/当前锁定协议决定首次请求，避免已经识别为 ANT/TT 后还混发 JK 指令。
+  // 根据“已保存协议”选择首次请求。
+  // JK/ANT/TT 已经保存时，不再混发其它协议命令，减少误探测和无效流量。
   String proto=String(protocolManager_.protocolName());
   if(proto=="ANT"){
     requestAntStatus();
+  } else if(proto=="TT"){
+    request(0x03);
+  } else if(proto=="JBD" || proto=="DALY"){
+    // 当前项目对应协议的 buildCommand() 决定是否支持实际查询。
+    // 不支持时不会发送伪造的 JK/ANT/TT 指令。
+    request(0x03);
   } else {
+    // 默认/未锁定协议仍使用兼容探测：JK -> ANT -> TT。
     request(0x96);
     delay(100);
     request(0x97);
-    // 尚未锁定时保留 ANT/TT 探测，收到有效帧后由 BmsProtocolManager 自动切换。
     delay(100);
     requestAntStatus();
     delay(100);
@@ -380,6 +388,18 @@ void BmsBle::handleNotification(const uint8_t* d,size_t n){
       g_bmsData.online=true;
       g_bmsData.updateMs=millis();
       lastRequest_=millis();
+
+      // 自动识别成功后，把协议写入 Preferences。
+      // 只有协议真正发生变化时才写 Flash，避免每一帧都产生擦写。
+      String detected=String(protocolManager_.protocolName());
+      Preferences p;
+      p.begin("jkcfg",false);
+      String saved=p.getString("protocol","");
+      if(detected.length() && detected!="NONE" && detected!=saved){
+        p.putString("protocol",detected);
+        Serial.printf("BMS protocol locked: %s\n",detected.c_str());
+      }
+      p.end();
     }
 
     memmove(g_rxBuf,g_rxBuf+expected,g_rxLen-expected);
@@ -419,44 +439,104 @@ void BmsBle::request(uint8_t cmd){
   else if(writer->canWrite()) writer->writeValue(f,n,true);
 }
 
-// [运行期] 连接保持、断线恢复、定时请求。\nvoid BmsBle::loop(){
+// [运行期] 连接保持、断线恢复、定时请求。
+// 规则：任何运行期 BLE 恢复连续失败3次，都进入热点配置。
+void BmsBle::loop(){
+  uint32_t now=millis();
+
   if(!connected()){
     g_bmsData.online=false;
+    recoveryVerifyStart_=0;
 
-    if(g_bmsData.bootState==BOOT_CONNECTED)
-      setStatus(BOOT_SCANNING,"蓝牙已断开");
-
-    if(g_bmsData.bootState!=BOOT_HOTSPOT &&
-       millis()-lastReconnectAttempt_>=5000){
-      lastReconnectAttempt_=millis();
+    // 只有首次启动已经成功进入正常运行后，才启用“断线恢复3次失败 -> 热点”。
+    if(runtimeRecoveryEnabled_ && g_bmsData.bootState!=BOOT_HOTSPOT &&
+       now-lastReconnectAttempt_>=5000UL){
+      lastReconnectAttempt_=now;
       uint8_t reconnectAttempt=scanAttempt_;
       if(reconnectAttempt<1 || reconnectAttempt>3) reconnectAttempt=1;
-      if(!scanAndConnect(3,reconnectAttempt)) g_bmsData.online=false;
+
+      Serial.printf("BLE RECOVERY: attempt %u/3, previous failures=%u\\n",
+                    reconnectAttempt,recoveryFailures_);
+
+      if(scanAndConnect(3,reconnectAttempt)){
+        // GATT已经恢复，但必须继续等待真正的BMS有效帧。
+        recoveryVerifyStart_=now;
+        if(g_bmsData.valid){
+          recoveryFailures_=0;
+          recoveryVerifyStart_=0;
+          Serial.println("BLE RECOVERY: GATT + valid BMS data restored.");
+        }
+      } else {
+        recoveryFailures_++;
+        Serial.printf("BLE RECOVERY: failed %u/3\\n",recoveryFailures_);
+      }
+
+      if(recoveryFailures_>=3){
+        Serial.println("BLE RECOVERY: 3 consecutive failures -> HOTSPOT");
+        recoveryFailures_=0;
+        recoveryVerifyStart_=0;
+        releaseConnectionForHotspot();
+        g_bmsData.bootState=BOOT_HOTSPOT;
+        g_bmsData.statusMessage="蓝牙恢复连续3次失败，进入配网";
+        return;
+      }
     }
     return;
   }
 
-  // dionipe 的另一个实用增强：数据看似“已连接”但长期没有有效帧时主动重连。
-  // 这里不改变协议层，只把 BLE 传输恢复交给现有重连流程。
-  if(g_bmsData.valid && g_bmsData.updateMs!=0 && millis()-g_bmsData.updateMs>15000UL){
+  // GATT连接成功但尚未收到有效BMS数据：给协议探测最多4秒。
+  // 超时视为一次恢复失败，避免“连接成功但数据死掉”永久卡在在线状态。
+  if(runtimeRecoveryEnabled_ && !g_bmsData.valid && recoveryVerifyStart_!=0 &&
+     now-recoveryVerifyStart_>=4000UL){
+    Serial.println("BLE RECOVERY: connected but no valid BMS frame.");
+    if(client_) client_->disconnect();
+    g_bmsData.online=false;
+    g_bmsData.valid=false;
+    g_rxLen=0;
+    g_legacyAckSeen=false;
+    recoveryVerifyStart_=0;
+    recoveryFailures_++;
+    lastReconnectAttempt_=now-5000UL;
+
+    if(recoveryFailures_>=3){
+      Serial.println("BLE RECOVERY: 3 consecutive failures -> HOTSPOT");
+      recoveryFailures_=0;
+      releaseConnectionForHotspot();
+      g_bmsData.bootState=BOOT_HOTSPOT;
+      g_bmsData.statusMessage="蓝牙恢复连续3次失败，进入配网";
+    }
+    return;
+  }
+
+  // 一旦收到有效数据，说明本次恢复真正成功，连续失败计数清零。
+  if(runtimeRecoveryEnabled_ && g_bmsData.valid && recoveryVerifyStart_!=0){
+    recoveryFailures_=0;
+    recoveryVerifyStart_=0;
+    Serial.println("BLE RECOVERY: valid BMS data confirmed, failure counter reset.");
+  }
+
+  // 已连接但15秒没有任何有效帧，也视为通信恢复失败，重新进入3次恢复状态机。
+  if(g_bmsData.valid && g_bmsData.updateMs!=0 && now-g_bmsData.updateMs>15000UL){
     Serial.println("BMS BLE: connected but no valid frame for 15s, reconnect");
     if(client_) client_->disconnect();
     g_bmsData.online=false;
     g_bmsData.valid=false;
     g_rxLen=0;
     g_legacyAckSeen=false;
-    lastReconnectAttempt_=millis()-5000UL;
+    recoveryVerifyStart_=0;
+    lastReconnectAttempt_=now-5000UL;
     return;
   }
 
   String proto=String(protocolManager_.protocolName());
   if(proto=="TT"){
-    if(millis()-lastRequest_>=250){ request(0x03); lastRequest_=millis(); }
+    if(now-lastRequest_>=250){ request(0x03); lastRequest_=now; }
   } else if(proto=="ANT"){
-    if(millis()-lastRequest_>=2000){ requestAntStatus(); lastRequest_=millis(); }
-  } else {
-    uint32_t requestInterval=g_bmsData.valid?5000UL:1500UL;
-    if(millis()-lastRequest_>requestInterval){ request(0x96); requestAntStatus(); requestTtProbe(); lastRequest_=millis(); }
+    if(now-lastRequest_>=2000){ requestAntStatus(); lastRequest_=now; }
+  } else if(proto=="JK"){
+    if(now-lastRequest_>=5000){ request(0x96); lastRequest_=now; }
+  } else if(proto=="JBD" || proto=="DALY"){
+    if(now-lastRequest_>=2000){ request(0x03); lastRequest_=now; }
   }
 }
 
@@ -478,6 +558,7 @@ bool BmsBle::connected() const{
   g_bmsData.valid=false;
   g_rxLen=0;
   g_legacyAckSeen=false;
+  recoveryVerifyStart_=0;
 
   NimBLEScan* s=NimBLEDevice::getScan();
   if(s){
