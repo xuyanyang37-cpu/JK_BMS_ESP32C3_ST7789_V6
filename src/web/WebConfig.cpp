@@ -63,7 +63,7 @@ input,select{padding:11px;margin:5px 0;width:100%;border-radius:8px;border:1px s
 <div>
 <button onclick="scan()">扫描蓝牙电池</button>
 <button onclick="save()">保存参数</button>
-<button onclick="location.href='/protection'">保护板设置</button>
+<button onclick="location.href='/protection'">保护板设置</button><button onclick="location.href='/display'">屏幕显示设置</button>
 </div>
 <div id="list"></div>
 
@@ -192,10 +192,12 @@ String WebConfig::makeStatusJson(){
 
   server_.on("/",HTTP_GET,[this](){handleRoot();});
   server_.on("/protection",HTTP_GET,[this](){handleProtection();});
+  server_.on("/display",HTTP_GET,[this](){handleDisplay();});
   server_.on("/api/status",HTTP_GET,[this](){handleStatus();});
   server_.on("/api/scan",HTTP_GET,[this](){handleScan();});
   server_.on("/api/connect",HTTP_GET,[this](){handleConnect();});
   server_.on("/api/save",HTTP_POST,[this](){handleSave();});
+  server_.on("/api/display/save",HTTP_POST,[this](){handleDisplaySave();});
   server_.on("/api/protection/save",HTTP_POST,[this](){handleProtectionSave();});
   server_.on("/api/protection/clear",HTTP_POST,[this](){handleProtectionClear();});
   server_.on("/api/restart",HTTP_POST,[this](){handleRestart();});
@@ -210,6 +212,73 @@ String WebConfig::makeStatusJson(){
 void WebConfig::handleRoot(){
   // 页面常量放在 Flash，访问网页时不再创建几 KB 的临时 String。
   server_.send_P(200,"text/html; charset=utf-8",WEB_PAGE);
+}
+
+void WebConfig::handleDisplay(){
+  static const char PAGE[] PROGMEM = R"HTML(<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>屏幕显示设置</title>
+<style>
+body{font-family:Arial,"Microsoft YaHei",sans-serif;background:#0b1015;color:#eee;margin:0;padding:14px}
+.card{max-width:760px;margin:auto;background:#151c23;border-radius:16px;padding:18px}
+.item{padding:12px;border:1px solid #394652;border-radius:10px;margin:9px 0;background:#10161c}
+select,input{padding:9px;border-radius:8px;border:1px solid #4a5662;background:#0d1217;color:#fff}
+select{width:48%}input[type=color]{width:52px;height:38px;padding:2px;vertical-align:middle}
+button{padding:11px 15px;margin:5px;border:0;border-radius:9px;background:#1976d2;color:#fff;font-size:15px}
+.small{color:#aeb8c2;font-size:13px}.row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+</style></head><body><div class="card">
+<h2>1.9寸屏幕显示设置</h2>
+<div class="small">320×170 固定布局；只改变每个位置显示的数据、颜色和字体，不改变屏幕结构。</div>
+<div id="rows"></div>
+<div class="item">
+<b>SOC / 左下区域</b>
+<div class="row">SOC颜色 <input id="socColor" type="color"> 温度颜色 <input id="tempColor" type="color"> 容量颜色 <input id="capColor" type="color"></div>
+<label><input id="bar" type="checkbox"> 显示底部SOC渐变条</label>
+</div>
+<button onclick="save()">保存并立即应用</button>
+<button onclick="location.href='/'">返回主页</button>
+<div id="msg" class="small"></div>
+</div>
+<script>
+const metrics=[
+["0","电压"],["1","电流"],["2","功率"],["3","最低电压"],["4","最高电压"],["5","平均电压"],
+["6","单体压差"],["7","电芯数量"],["8","MOS温度"],["9","温度1"],["10","温度2"],
+["11","剩余容量"],["12","总容量"],["13","剩余里程"],["14","SOC"],["15","循环次数"]];
+let cfg;
+function color16(v){let r=((v>>11)&31)*255/31,g=((v>>5)&63)*255/63,b=(v&31)*255/31;return "#"+[r,g,b].map(x=>Math.round(x).toString(16).padStart(2,"0")).join("");}
+function hex16(s){let n=parseInt(s.slice(1),16);let r=(n>>16)&255,g=(n>>8)&255,b=n&255;return ((r>>3)<<11)|((g>>2)<<5)|(b>>3);}
+function build(){
+ let h="";
+ for(let i=0;i<4;i++){
+   let x=cfg.row[i];
+   h+='<div class="item"><b>第'+(i+1)+'行</b><div class="row">';
+   h+='<select id="m'+i+'">'+metrics.map(m=>'<option value="'+m[0]+'" '+(Number(m[0])===x.metric?'selected':'')+'>'+m[1]+'</option>').join("")+'</select>';
+   h+='<input id="c'+i+'" type="color" value="'+color16(x.color)+'">';
+   h+='<select id="f'+i+'"><option value="2">字体2</option><option value="3">字体3</option><option value="4">字体4</option></select>';
+   h+='</div></div>';
+ }
+ document.getElementById("rows").innerHTML=h;
+ for(let i=0;i<4;i++)document.getElementById("f"+i).value=cfg.row[i].font;
+ document.getElementById("socColor").value=color16(cfg.socColor);
+ document.getElementById("tempColor").value=color16(cfg.tempColor);
+ document.getElementById("capColor").value=color16(cfg.capacityColor);
+ document.getElementById("bar").checked=cfg.socBar;
+}
+async function load(){cfg=await (await fetch("/api/display")).json();build();}
+async function save(){
+ let fd=new FormData();
+ for(let i=0;i<4;i++){fd.append("m"+i,document.getElementById("m"+i).value);fd.append("c"+i,document.getElementById("c"+i).value);fd.append("f"+i,document.getElementById("f"+i).value);}
+ fd.append("socColor",document.getElementById("socColor").value);
+ fd.append("tempColor",document.getElementById("tempColor").value);
+ fd.append("capColor",document.getElementById("capColor").value);
+ fd.append("bar",document.getElementById("bar").checked?"1":"0");
+ let r=await (await fetch("/api/display/save",{method:"POST",body:fd})).json();
+ document.getElementById("msg").textContent=r.message||"已保存";
+ load();
+}
+load();
+</script></body></html>)HTML";
+  server_.send_P(200,"text/html; charset=utf-8",PAGE);
 }
 
 void WebConfig::handleProtection(){
@@ -241,6 +310,23 @@ async function restart(){if(!confirm("确定重启 ESP32？"))return;try{await a
 load();setInterval(load,2000);
 </script></body></html>)HTML";
   server_.send_P(200,"text/html; charset=utf-8",PAGE);
+}
+
+// [接口] 返回屏幕显示配置。
+void WebConfig::handleDisplay(){
+  String j="{\"row\":[";
+  for(uint8_t i=0;i<4;i++){
+    if(i) j+=",";
+    j+="{\"metric\":"+String(g_displayConfig.row[i].metric)+
+      ",\"name\":\""+jsonEscape(displayMetricName(g_displayConfig.row[i].metric))+
+      "\",\"color\":"+String(g_displayConfig.row[i].color)+
+      ",\"font\":"+String(g_displayConfig.row[i].font)+"}";
+  }
+  j+="],\"socColor\":"+String(g_displayConfig.socColor)+
+     ",\"tempColor\":"+String(g_displayConfig.tempColor)+
+     ",\"capacityColor\":"+String(g_displayConfig.capacityColor)+
+     ",\"socBar\":"+(String(g_displayConfig.socBar?"true":"false"))+"}";
+  server_.send(200,"application/json; charset=utf-8",j);
 }
 
 // [接口] 返回当前BMS状态，前端定时刷新。\nvoid WebConfig::handleStatus(){
@@ -332,6 +418,41 @@ load();setInterval(load,2000);
   server_.send(200,"application/json; charset=utf-8",
                "{\"message\":\"参数已保存，下次开机自动使用\""
                ",\"mac\":\""+jsonEscape(mac)+"\"}");
+}
+
+// [接口] 返回屏幕显示配置。
+void WebConfig::handleDisplaySave(){
+  for(uint8_t i=0;i<4;i++){
+    String mk="m"+String(i), ck="c"+String(i), fk="f"+String(i);
+    if(server_.hasArg(mk)) g_displayConfig.row[i].metric=(uint8_t)server_.arg(mk).toInt();
+    if(server_.hasArg(fk)) g_displayConfig.row[i].font=(uint8_t)server_.arg(fk).toInt();
+    if(g_displayConfig.row[i].metric>DISPLAY_CYCLE_COUNT) g_displayConfig.row[i].metric=DISPLAY_VOLTAGE;
+    if(g_displayConfig.row[i].font<2 || g_displayConfig.row[i].font>4) g_displayConfig.row[i].font=4;
+    if(server_.hasArg(ck)){
+      String s=server_.arg(ck); s.trim();
+      if(s.length()==7 && s[0]=='#'){
+        long n=strtol(s.c_str()+1,nullptr,16);
+        uint8_t r=(n>>16)&255, g=(n>>8)&255, b=n&255;
+        g_displayConfig.row[i].color=((uint16_t)(r>>3)<<11)|((uint16_t)(g>>2)<<5)|(uint16_t)(b>>3);
+      }
+    }
+  }
+  auto parseColor=[this](const char* key,uint16_t fallback)->uint16_t{
+    if(!server_.hasArg(key)) return fallback;
+    String s=server_.arg(key); s.trim();
+    if(s.length()!=7 || s[0]!='#') return fallback;
+    long n=strtol(s.c_str()+1,nullptr,16);
+    uint8_t r=(n>>16)&255,g=(n>>8)&255,b=n&255;
+    return ((uint16_t)(r>>3)<<11)|((uint16_t)(g>>2)<<5)|(uint16_t)(b>>3);
+  };
+  g_displayConfig.socColor=parseColor("socColor",g_displayConfig.socColor);
+  g_displayConfig.tempColor=parseColor("tempColor",g_displayConfig.tempColor);
+  g_displayConfig.capacityColor=parseColor("capColor",g_displayConfig.capacityColor);
+  g_displayConfig.socBar=server_.hasArg("bar") && server_.arg("bar")=="1";
+  g_displayConfig.save();
+
+  server_.send(200,"application/json; charset=utf-8",
+               R"({"message":"屏幕显示设置已保存并立即生效"})");
 }
 
 // [接口] 保存保护板手动选择。
