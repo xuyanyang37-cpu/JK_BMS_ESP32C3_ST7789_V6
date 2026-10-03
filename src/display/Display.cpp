@@ -495,7 +495,7 @@ void Display::drawTemperature(const BmsData& d) {
   FontGB2312::drawText(leftInfoSprite_, 77, 3,
                        "容量", capacityColor, UI_PANEL, 1);
   FontGB2312::drawText(leftInfoSprite_, 78, 3,
-                       "容量", UI_WHITE, UI_PANEL, 1);
+                       "容量", capacityColor, UI_PANEL, 1);
 
   String cap = String(d.remainingCapacityAh, 1) + "Ah";
   leftInfoSprite_.setTextColor(capacityColor, UI_PANEL);
