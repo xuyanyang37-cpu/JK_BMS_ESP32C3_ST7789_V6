@@ -1,6 +1,7 @@
 #include "Display.h"
 #include "FontGB2312.h"
 #include <math.h>
+#include <stdint.h>
 
 /*
  * JK BMS + ST7789 1.9" / 320x170
@@ -64,9 +65,10 @@ namespace {
 
   static void drawMetricRow(TFT_eSprite& sprite,
                             char icon,
-                            const char* label,
+                            const String& label,
                             const String& value,
-                            uint16_t color) {
+                            uint16_t color,
+                            uint8_t font) {
     sprite.fillSprite(TFT_BLACK);
     sprite.fillRoundRect(0, 0, 168, 36, 7, UI_PANEL);
 
@@ -77,13 +79,13 @@ namespace {
     sprite.drawCentreString(String(icon), 16, 5, 2);
 
     FontGB2312::drawText(sprite, 31, 7,
-                         String(label), color, UI_PANEL, 1);
+                         label, color, UI_PANEL, 1);
     FontGB2312::drawText(sprite, 32, 7,
-                         String(label), color, UI_PANEL, 1);
+                         label, color, UI_PANEL, 1);
 
     sprite.setTextColor(color, UI_PANEL);
-    sprite.drawRightString(value, 163, 1, 4);
-    sprite.drawRightString(value, 164, 1, 4);
+    sprite.drawRightString(value, 163, 1, font);
+    sprite.drawRightString(value, 164, 1, font);
   }
 }
 
@@ -242,6 +244,7 @@ void Display::drawScanningScreen(const BmsData& d, bool force) {
 void Display::drawFullPage(const BmsData& d) {
   tft_.fillScreen(TFT_BLACK);
   firstDashboard_ = (d.online || d.bootState == BOOT_CONNECTED);
+  g_displayConfig.load();
 
   if (d.bootState == BOOT_SCANNING ||
       d.bootState == BOOT_START) {
@@ -399,11 +402,11 @@ void Display::drawDashboard(const BmsData& d, bool force) {
     tft_.fillScreen(TFT_BLACK);
 
     drawSoc(d);
-    drawVoltage(d);
-    drawCurrent(d);
-    drawMinVoltage(d);
+    drawConfiguredRow(0, d);
+    drawConfiguredRow(1, d);
+    drawConfiguredRow(2, d);
+    drawConfiguredRow(3, d);
     drawTemperature(d);
-    drawRange(d);
     drawSocBar(d);
     return;
   }
@@ -413,26 +416,17 @@ void Display::drawDashboard(const BmsData& d, bool force) {
     drawSocBar(d);
   }
 
-  if (changed(d.totalVoltage, lastData_.totalVoltage, 0.1f)) {
-    drawVoltage(d);
-  }
-
-  if (changed(d.current, lastData_.current, 0.1f)) {
-    drawCurrent(d);
-  }
-
-  if (changed(d.minCellVoltage, lastData_.minCellVoltage, 0.001f)) {
-    drawMinVoltage(d);
+  for (uint8_t i = 0; i < 4; ++i) {
+    if (metricChanged(g_displayConfig.row[i].metric, d, lastData_)) {
+      drawConfiguredRow(i, d);
+    }
   }
 
   if (changed(d.remainingCapacityAh, lastData_.remainingCapacityAh, 0.1f) ||
       changed(d.temperature1, lastData_.temperature1, 0.1f) ||
-      changed(d.deltaCellVoltage, lastData_.deltaCellVoltage, 0.001f)) {
+      changed(d.temperature2, lastData_.temperature2, 0.1f) ||
+      changed(d.mosTemperature, lastData_.mosTemperature, 0.1f)) {
     drawTemperature(d);
-  }
-
-  if (changed(d.remainingRangeKm, lastData_.remainingRangeKm, 0.1f)) {
-    drawRange(d);
   }
 }
 
@@ -489,17 +483,80 @@ void Display::drawTemperature(const BmsData& d) {
   leftInfoSprite_.pushSprite(4, 118);
 }
 
+bool Display::metricChanged(uint8_t metric, const BmsData& a, const BmsData& b) const {
+  switch (metric) {
+    case DISPLAY_VOLTAGE: return changed(a.totalVoltage, b.totalVoltage, 0.01f);
+    case DISPLAY_CURRENT: return changed(a.current, b.current, 0.01f);
+    case DISPLAY_POWER: return changed(a.power, b.power, 1.0f);
+    case DISPLAY_MIN_VOLTAGE: return changed(a.minCellVoltage, b.minCellVoltage, 0.001f);
+    case DISPLAY_MAX_VOLTAGE: return changed(a.maxCellVoltage, b.maxCellVoltage, 0.001f);
+    case DISPLAY_AVG_VOLTAGE: {
+      float aa=0, bb=0; uint8_t ac=0, bc=0;
+      for(uint8_t i=0;i<JK_MAX_CELLS;i++){ if(a.cellVoltage[i]>0.1f){aa+=a.cellVoltage[i];ac++;} if(b.cellVoltage[i]>0.1f){bb+=b.cellVoltage[i];bc++;} }
+      if(ac) aa/=ac; if(bc) bb/=bc;
+      return changed(aa,bb,0.001f);
+    }
+    case DISPLAY_DELTA_VOLTAGE: return changed(a.deltaCellVoltage, b.deltaCellVoltage, 0.001f);
+    case DISPLAY_CELL_COUNT: return a.cellCount != b.cellCount;
+    case DISPLAY_MOS_TEMP: return changed(a.mosTemperature, b.mosTemperature, 0.1f);
+    case DISPLAY_TEMP1: return changed(a.temperature1, b.temperature1, 0.1f);
+    case DISPLAY_TEMP2: return changed(a.temperature2, b.temperature2, 0.1f);
+    case DISPLAY_REMAINING_CAPACITY: return changed(a.remainingCapacityAh, b.remainingCapacityAh, 0.1f);
+    case DISPLAY_TOTAL_CAPACITY: return changed(a.totalCapacityAh, b.totalCapacityAh, 0.1f);
+    case DISPLAY_REMAINING_RANGE: return changed(a.remainingRangeKm, b.remainingRangeKm, 0.1f);
+    case DISPLAY_SOC: return changed(a.soc, b.soc, 0.5f);
+    case DISPLAY_CYCLE_COUNT: return a.cycleCount != b.cycleCount;
+    default: return true;
+  }
+}
+
+void Display::drawConfiguredRow(uint8_t index, const BmsData& d) {
+  if(index >= 4) return;
+  const DisplayRowConfig& cfg = g_displayConfig.row[index];
+  String label = displayMetricName(cfg.metric);
+  String value;
+  char icon = 'V';
+
+  switch(cfg.metric) {
+    case DISPLAY_VOLTAGE: value=String(d.totalVoltage,2)+"V"; icon='V'; break;
+    case DISPLAY_CURRENT: value=String(d.current,1)+"A"; icon='A'; break;
+    case DISPLAY_POWER: value=String(d.power,0)+"W"; icon='W'; break;
+    case DISPLAY_MIN_VOLTAGE: value=String(d.minCellVoltage,3)+"V"; icon='V'; break;
+    case DISPLAY_MAX_VOLTAGE: value=String(d.maxCellVoltage,3)+"V"; icon='V'; break;
+    case DISPLAY_AVG_VOLTAGE: {
+      float sum=0; uint8_t count=0;
+      for(uint8_t i=0;i<JK_MAX_CELLS;i++){ if(d.cellVoltage[i]>0.1f){sum+=d.cellVoltage[i];count++;} }
+      value=String(count ? sum/count : 0.0f,3)+"V"; icon='V'; break;
+    }
+    case DISPLAY_DELTA_VOLTAGE: value=String(d.deltaCellVoltage*1000.0f,0)+"mV"; icon='D'; break;
+    case DISPLAY_CELL_COUNT: value=String(d.cellCount)+"S"; icon='C'; break;
+    case DISPLAY_MOS_TEMP: value=String(d.mosTemperature,0)+"C"; icon='T'; break;
+    case DISPLAY_TEMP1: value=String(d.temperature1,0)+"C"; icon='T'; break;
+    case DISPLAY_TEMP2: value=String(d.temperature2,0)+"C"; icon='T'; break;
+    case DISPLAY_REMAINING_CAPACITY: value=String(d.remainingCapacityAh,1)+"Ah"; icon='A'; break;
+    case DISPLAY_TOTAL_CAPACITY: value=String(d.totalCapacityAh,1)+"Ah"; icon='A'; break;
+    case DISPLAY_REMAINING_RANGE: value=String(d.remainingRangeKm,0)+" KM"; icon='R'; break;
+    case DISPLAY_SOC: value=String(d.soc,0)+"%"; icon='S'; break;
+    case DISPLAY_CYCLE_COUNT: value=String(d.cycleCount); icon='C'; break;
+    default: value=String(d.totalVoltage,2)+"V"; label="电压"; icon='V'; break;
+  }
+
+  drawMetricRow(rowSprite_, icon, label, value, cfg.color, cfg.font);
+  static const int16_t y[4]={4,42,80,118};
+  rowSprite_.pushSprite(148, y[index]);
+}
+
 void Display::drawVoltage(const BmsData& d) {
   drawMetricRow(rowSprite_, 'V', "电压",
                 String(d.totalVoltage, 2) + "V",
-                UI_VOLTAGE);
+                UI_VOLTAGE, 4);
   rowSprite_.pushSprite(148, 4);
 }
 
 void Display::drawCurrent(const BmsData& d) {
   drawMetricRow(rowSprite_, 'A', "电流",
                 String(d.current, 1) + "A",
-                UI_CURRENT);
+                UI_CURRENT, 4);
   rowSprite_.pushSprite(148, 42);
 }
 
@@ -507,7 +564,7 @@ void Display::drawMinVoltage(const BmsData& d) {
   // 第三行按实物仪表布局显示“最低电压”，不再显示功率。
   drawMetricRow(rowSprite_, 'V', "最低",
                 String(d.minCellVoltage, 3) + "V",
-                UI_MIN_VOLTAGE);
+                UI_MIN_VOLTAGE, 4);
   rowSprite_.pushSprite(148, 80);
 }
 
