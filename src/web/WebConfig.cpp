@@ -220,6 +220,13 @@ void WebConfig::handleRoot(){
   server_.send_P(200,"text/html; charset=utf-8",WEB_PAGE);
 }
 
+/*
+ * GET /display
+ * ---------------------------------------------------------------
+ * 返回屏幕配置页面。
+ * 页面只负责收集用户设置，不直接操作Display对象。
+ * 保存时通过POST /api/display/save提交。
+ */
 void WebConfig::handleDisplay(){
   static const char PAGE[] PROGMEM = R"HTML(<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -272,13 +279,24 @@ function build(){
 }
 async function load(){cfg=await (await fetch("/api/display")).json();build();}
 async function save(){
- let fd=new FormData();
- for(let i=0;i<4;i++){fd.append("m"+i,document.getElementById("m"+i).value);fd.append("c"+i,document.getElementById("c"+i).value);fd.append("f"+i,document.getElementById("f"+i).value);}
- fd.append("socColor",document.getElementById("socColor").value);
- fd.append("tempColor",document.getElementById("tempColor").value);
- fd.append("capColor",document.getElementById("capColor").value);
- fd.append("bar",document.getElementById("bar").checked?"1":"0");
- let r=await (await fetch("/api/display/save",{method:"POST",body:fd})).json();
+ let data=new URLSearchParams();
+ for(let i=0;i<4;i++){
+   data.append("m"+i,document.getElementById("m"+i).value);
+   data.append("c"+i,document.getElementById("c"+i).value);
+   data.append("f"+i,document.getElementById("f"+i).value);
+ }
+ data.append("socColor",document.getElementById("socColor").value);
+ data.append("tempColor",document.getElementById("tempColor").value);
+ data.append("capColor",document.getElementById("capColor").value);
+ data.append("bar",document.getElementById("bar").checked?"1":"0");
+
+ // Arduino WebServer原生稳定支持application/x-www-form-urlencoded。
+ // 使用URLSearchParams而不是multipart FormData，避免ESP32端hasArg()收不到参数。
+ let r=await (await fetch("/api/display/save",{
+   method:"POST",
+   headers:{"Content-Type":"application/x-www-form-urlencoded"},
+   body:data.toString()
+ })).json();
  document.getElementById("msg").textContent=r.message||"已保存";
  load();
 }
@@ -319,6 +337,12 @@ load();setInterval(load,2000);
 }
 
 // [接口] 返回屏幕显示配置 JSON。
+/*
+ * GET /api/display
+ * ---------------------------------------------------------------
+ * 返回当前DisplayConfig给网页JavaScript。
+ * 颜色保持RGB565整数，网页负责转换成HTML #RRGGBB。
+ */
 void WebConfig::handleDisplayStatus(){
   String j="{\"row\":[";
   for(uint8_t i=0;i<4;i++){
@@ -431,6 +455,20 @@ void WebConfig::handleSave(){
 }
 
 // [接口] 返回屏幕显示配置。
+/*
+ * POST /api/display/save
+ * ---------------------------------------------------------------
+ * 接收网页的四行指标、颜色、字体和SOC条设置。
+ * 处理顺序：
+ *   1. 读取HTTP参数
+ *   2. 限制枚举/字体范围
+ *   3. RGB888转换为ST7789使用的RGB565
+ *   4. 写入g_displayConfig
+ *   5. Preferences持久化
+ *
+ * Display::update()下一次运行时检测配置变化，
+ * 重新绘制受影响的局部区域，因此无需重启。
+ */
 void WebConfig::handleDisplaySave(){
   for(uint8_t i=0;i<4;i++){
     String mk="m"+String(i), ck="c"+String(i), fk="f"+String(i);
