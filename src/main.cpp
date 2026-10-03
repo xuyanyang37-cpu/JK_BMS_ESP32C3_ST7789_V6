@@ -22,7 +22,8 @@
  *  B. 找到但连接失败         -> 下一次扫描
  *  C. 连接成功但没有有效数据 -> 释放连接 -> 下一次扫描
  *  D. 3次全部失败            -> HOTSPOT 配网
- *  E. 正常运行中 BLE断开      -> BmsBle.loop() 每15秒尝试恢复
+ *  E. 正常运行中 BLE断开      -> BmsBle.loop() 每5秒恢复一次
+ *  F. 任意运行期恢复连续3次失败 -> HOTSPOT 配网
  *
  * 这里尽量只写“为什么”，具体协议解析请看 protocol/ 目录。
  * ================================================================
@@ -43,10 +44,6 @@ static Display display;
 static WebConfig webConfig;
 static const char* AP_SSID="JK-BMS-SETUP";
 static const char* AP_PASSWORD="12345678";
-
-// RTC RAM：芯片软重启后仍可保留。
-// 当前只保存“连续失败次数”这个启动辅助状态。
-RTC_DATA_ATTR static uint8_t rtcFailedScanAttempts=0;
 
 /*
  * 业务分支：启动热点配网。
@@ -199,10 +196,14 @@ void setup(){
   if(connectedOk){
     g_bmsData.bootState=BOOT_CONNECTED;
     g_bmsData.online=true;
-    g_bmsData.statusMessage="已连接JK电池";
+    String proto=bmsBle.getPreferredProtocol();
+    g_bmsData.statusMessage="已连接 "+proto+" 电池";
     display.update(g_bmsData);
 
-    Serial.println("BOOT: V2 connection screen flow completed, JK data valid.");
+    // 首次启动已经完成“连接 + 有效数据”验证。
+    // 从这里开始，运行期断线恢复才启用独立的3次失败状态机。
+    bmsBle.setRuntimeRecoveryEnabled(true);
+    Serial.printf("BOOT: connection verified, protocol=%s, runtime recovery enabled.\\n",proto.c_str());
 
     // setup() return 后，Arduino自动进入 loop()。
     return;
@@ -255,6 +256,13 @@ void loop(){
    *    - 给BLE/WiFi后台任务留出运行时间
    */
   bmsBle.loop();
+
+  // BmsBle负责判断“连续3次恢复失败”，但不直接操作WebConfig。
+  // 一旦进入BOOT_HOTSPOT，由main统一启动SoftAP和网页服务。
+  if(g_bmsData.bootState==BOOT_HOTSPOT && !g_bmsData.hotspot){
+    startHotspot();
+  }
+
   webConfig.loop();
 
   static uint32_t drawMs=0;
