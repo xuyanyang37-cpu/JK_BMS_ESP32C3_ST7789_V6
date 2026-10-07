@@ -211,75 +211,42 @@ void Display::update(const BmsData& d) {
 }
 
 void Display::drawScanningScreen(const BmsData& d, bool force) {
-  // 只在第一次进入扫描页时画固定内容。
+  // 参考 ESP32E28 的启动页原则：
+  // 只用 LCD 原生绘图，不创建任何 Sprite / framebuffer。
+  // 这样 BLE 扫描刚启动时不会因为显示缓存抢占连续 RAM。
   if (force) {
     tft_.fillScreen(TFT_BLACK);
 
-    // 扫描页文字统一绘制到 Sprite，不直接绘制到 tft_。
-    TFT_eSprite scanSprite(&tft_);
-    scanSprite.setColorDepth(16);
+    // 大号启动标题，模拟参考项目的“启动仪表页”层次。
+    tft_.setTextColor(TFT_CYAN, TFT_BLACK);
+    tft_.drawCentreString("JK BMS", 160, 18, 4);
 
-    if (scanSprite.createSprite(160, 36)) {
-      scanSprite.fillSprite(TFT_BLACK);
+    tft_.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft_.drawCentreString("ESP32-C3", 160, 52, 2);
 
-      FontGB2312::drawCenterString(scanSprite, 80, 3,
-                                   "连接电池",
-                                   TFT_CYAN, TFT_BLACK, 2);
+    // 中央状态卡：纯几何图形，无 Sprite。
+    tft_.drawRoundRect(35, 78, 250, 38, 8, TFT_DARKGREY);
+    tft_.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+    tft_.drawCentreString("SCANNING BLUETOOTH", 160, 88, 2);
 
-      FontGB2312::drawCenterString(scanSprite, 80, 22,
-                                   "扫描蓝牙电池",
-                                   TFT_WHITE, TFT_BLACK, 1);
-
-      scanSprite.pushSprite(80, 0);
-      scanSprite.deleteSprite();
-    }
-
-    // 进度条外框
-    tft_.drawRoundRect(35, 72, 250, 18, 5, TFT_DARKGREY);
-
-    // 底部文字也使用 Sprite，避免 tft_ 直接绘制中文。
-    TFT_eSprite bottomSprite(&tft_);
-    bottomSprite.setColorDepth(16);
-
-    if (bottomSprite.createSprite(240, 28)) {
-      bottomSprite.fillSprite(TFT_BLACK);
-
-      FontGB2312::drawCenterString(bottomSprite, 120, 4,
-                                   "自动扫描并连接JK保护板",
-                                   TFT_LIGHTGREY, TFT_BLACK, 1);
-
-      bottomSprite.pushSprite(40, 132);
-      bottomSprite.deleteSprite();
-    }
+    tft_.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+    tft_.drawCentreString("JK BMS", 160, 132, 2);
   }
 
-  // 只刷新进度条内部区域，不碰其它区域。
-  TFT_eSprite scanSprite(&tft_);
-  scanSprite.setColorDepth(16);
-  scanSprite.createSprite(244, 12);
-  scanSprite.fillSprite(TFT_BLACK);
+  // 只覆盖进度条内部，不重绘整个启动页。
+  tft_.fillRect(43, 111, 234, 5, TFT_BLACK);
 
   int progress = (d.scanAttempt * 100) / 3;
   if (progress > 100) progress = 100;
   if (progress < 0) progress = 0;
 
-  int filled = 238 * progress / 100;
-  if (filled > 0)
-    scanSprite.fillRoundRect(1, 1, filled, 10, 4, TFT_BLUE);
+  int filled = 230 * progress / 100;
+  if (filled > 0) {
+    tft_.fillRoundRect(45, 111, filled, 5, 2, TFT_BLUE);
+  }
 
-  scanSprite.pushSprite(38, 75);
-  scanSprite.deleteSprite();
-
-  // 次数单独做一个很小的局部 Sprite。
-  TFT_eSprite countSprite(&tft_);
-  countSprite.setColorDepth(16);
-  countSprite.createSprite(80, 25);
-  countSprite.fillSprite(TFT_BLACK);
-  FontGB2312::drawCenterString(countSprite, 40, 2,
-                               String(d.scanAttempt) + "/3",
-                               TFT_YELLOW, TFT_BLACK, 1);
-  countSprite.pushSprite(120, 96);
-  countSprite.deleteSprite();
+  tft_.setTextColor(TFT_YELLOW, TFT_BLACK);
+  tft_.drawCentreString(String(d.scanAttempt) + "/3", 160, 150, 2);
 }
 
 void Display::drawFullPage(const BmsData& d) {
