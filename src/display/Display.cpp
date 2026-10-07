@@ -7,10 +7,10 @@
  * JK BMS + ST7789 1.9" / 320x170
  * UI 2.0 - 按设计图重新做像素级布局。
  *
- * 主界面：
- *   左：SOC
- *   左下：温度 / 剩余容量
- *   右：电压 / 电流 / 最低电压 / 剩余里程
+ * 主界面（参考 ESP32E28 风格并适配 320x170）：
+ *   顶部：BMS / BMS名称 / 蓝牙图标
+ *   左：SOC 仪表卡 + 温度 / 剩余容量
+ *   右：4 个可配置数据卡
  *   底：SOC 渐变条
  *
  * 主界面只显示电池运行数据，不显示连接状态文字。
@@ -20,6 +20,7 @@ namespace {
   // 设计图的深蓝色圆角卡片。
   static const uint16_t UI_PANEL      = 0x0948;
   static const uint16_t UI_PANEL_DARK = 0x0127;
+  static const uint16_t UI_HEADER     = 0x061F;
 
   static const uint16_t UI_WHITE   = TFT_WHITE;
   static const uint16_t UI_VOLTAGE = 0xFFE0; // 明黄色
@@ -70,22 +71,22 @@ namespace {
                             uint16_t color,
                             uint8_t font) {
     sprite.fillSprite(TFT_BLACK);
-    sprite.fillRoundRect(0, 0, 168, 36, 7, UI_PANEL);
+    sprite.fillRoundRect(0, 0, 168, 32, 7, UI_PANEL);
 
-    // 右侧四项统一布局：电压、电流、最低电压、剩余里程。
-    sprite.drawCircle(15, 14, 11, color);
+    // 右侧四项统一布局：固定位置、可由网页选择指标。
+    sprite.drawCircle(15, 15, 10, color);
     sprite.setTextColor(color, UI_PANEL);
-    sprite.drawCentreString(String(icon), 15, 5, 2);
-    sprite.drawCentreString(String(icon), 16, 5, 2);
+    sprite.drawCentreString(String(icon), 15, 6, 2);
+    sprite.drawCentreString(String(icon), 16, 6, 2);
 
-    FontGB2312::drawText(sprite, 31, 7,
+    FontGB2312::drawText(sprite, 31, 6,
                          label, color, UI_PANEL, 1);
-    FontGB2312::drawText(sprite, 32, 7,
+    FontGB2312::drawText(sprite, 32, 6,
                          label, color, UI_PANEL, 1);
 
     sprite.setTextColor(color, UI_PANEL);
-    sprite.drawRightString(value, 163, 1, font);
-    sprite.drawRightString(value, 164, 1, font);
+    sprite.drawRightString(value, 163, 0, font);
+    sprite.drawRightString(value, 164, 0, font);
   }
 }
 
@@ -257,6 +258,31 @@ void Display::drawScanningScreen(const BmsData& d, bool force) {
   countSprite.deleteSprite();
 }
 
+static void drawHeader(TFT_eSprite& sprite, const BmsData& d) {
+  sprite.fillSprite(TFT_BLACK);
+
+  // 参考 ESP32E28：顶部只保留身份/状态信息，不把“已连接”等长文本放进主数据区。
+  sprite.fillRoundRect(4, 2, 312, 20, 5, UI_HEADER);
+
+  FontGB2312::drawText(sprite, 10, 4,
+                       "BMS", TFT_YELLOW, UI_HEADER, 1);
+  FontGB2312::drawText(sprite, 11, 4,
+                       "BMS", TFT_YELLOW, UI_HEADER, 1);
+
+  String name = d.deviceName.length() ? d.deviceName : "JK BMS";
+  if (name.length() > 12) name = name.substring(0, 12);
+  sprite.setTextColor(TFT_WHITE, UI_HEADER);
+  sprite.drawCentreString(name, 160, 4, 2);
+
+  // 简洁蓝牙图标，连接状态仍由图标表达，不占用数据框。
+  const uint16_t bt = d.online ? TFT_CYAN : TFT_DARKGREY;
+  sprite.drawLine(300, 5, 300, 19, bt);
+  sprite.drawLine(300, 5, 306, 10, bt);
+  sprite.drawLine(306, 10, 300, 15, bt);
+  sprite.drawLine(300, 15, 306, 20, bt);
+  sprite.drawLine(306, 20, 300, 15, bt);
+}
+
 void Display::drawFullPage(const BmsData& d) {
   tft_.fillScreen(TFT_BLACK);
   firstDashboard_ = (d.online || d.bootState == BOOT_CONNECTED);
@@ -418,6 +444,14 @@ void Display::drawDashboard(const BmsData& d, bool force) {
   if (force) {
     tft_.fillScreen(TFT_BLACK);
 
+    TFT_eSprite header(&tft_);
+    header.setColorDepth(16);
+    if (header.createSprite(320, 24)) {
+      drawHeader(header, d);
+      header.pushSprite(0, 0);
+      header.deleteSprite();
+    }
+
     drawSoc(d);
     drawConfiguredRow(0, d);
     drawConfiguredRow(1, d);
@@ -450,8 +484,11 @@ void Display::drawDashboard(const BmsData& d, bool force) {
 
 void Display::drawSoc(const BmsData& d) {
   socSprite_.fillSprite(TFT_BLACK);
-  // 左侧 SOC 主卡片扩大，数字占据主要视觉区域。
-  drawPanel(socSprite_, 0, 0, 140, 109);
+  // 左侧 SOC 主卡片：参考 ESP32E28 的层次感，但保持 V6 的 320x170 结构。
+  drawPanel(socSprite_, 0, 0, 140, 91);
+
+  socSprite_.setTextColor(TFT_LIGHTGREY, UI_PANEL);
+  socSprite_.drawCentreString("SOC", 68, 5, 2);
 
   String value = String(d.soc, 0);
   // SOC颜色由网页配置决定；低电量的数值判断仍保留在业务层，
@@ -459,14 +496,24 @@ void Display::drawSoc(const BmsData& d) {
   uint16_t color = g_displayConfig.socColor;
 
   socSprite_.setTextColor(color, UI_PANEL);
-  socSprite_.drawCentreString(value, 68, 20, 7);
-  socSprite_.drawCentreString(value, 69, 20, 7);
+  socSprite_.drawCentreString(value, 68, 18, 7);
+  socSprite_.drawCentreString(value, 69, 18, 7);
 
   socSprite_.setTextColor(color, UI_PANEL);
-  socSprite_.drawString("%", 106, 73, 4);
-  socSprite_.drawString("%", 107, 73, 4);
+  socSprite_.drawString("%", 106, 67, 4);
+  socSprite_.drawString("%", 107, 67, 4);
 
-  socSprite_.pushSprite(4, 4);
+  // 半圆式强调环，模拟参考界面的仪表感。
+  const int16_t cx = 70;
+  const int16_t cy = 51;
+  const int16_t radius = 43;
+  socSprite_.drawArc(cx, cy, radius, radius - 3, 210, 330, UI_PANEL_DARK);
+  const int16_t endAngle = 210 + (static_cast<int16_t>(d.soc) * 120) / 100;
+  if (endAngle > 210) {
+    socSprite_.drawArc(cx, cy, radius, radius - 3, 210, endAngle, color);
+  }
+
+  socSprite_.pushSprite(4, 26);
 }
 
 void Display::drawTemperature(const BmsData& d) {
@@ -502,8 +549,8 @@ void Display::drawTemperature(const BmsData& d) {
   leftInfoSprite_.drawCentreString(cap, 106, 15, 2);
   leftInfoSprite_.drawCentreString(cap, 107, 15, 2);
 
-  // 局部刷新：只覆盖左下 140x36 区域。
-  leftInfoSprite_.pushSprite(4, 118);
+  // 局部刷新：与右侧第四行保持同一基线。
+  leftInfoSprite_.pushSprite(4, 126);
 }
 
 bool Display::displayConfigChanged() const {
@@ -596,7 +643,7 @@ void Display::drawConfiguredRow(uint8_t index, const BmsData& d) {
   }
 
   drawMetricRow(rowSprite_, icon, label, value, cfg.color, cfg.font);
-  static const int16_t y[4]={4,42,80,118};
+  static const int16_t y[4]={26,59,92,125};
   rowSprite_.pushSprite(148, y[index]);
 }
 
@@ -604,14 +651,14 @@ void Display::drawVoltage(const BmsData& d) {
   drawMetricRow(rowSprite_, 'V', "电压",
                 String(d.totalVoltage, 2) + "V",
                 UI_VOLTAGE, 4);
-  rowSprite_.pushSprite(148, 4);
+  rowSprite_.pushSprite(148, 26);
 }
 
 void Display::drawCurrent(const BmsData& d) {
   drawMetricRow(rowSprite_, 'A', "电流",
                 String(d.current, 1) + "A",
                 UI_CURRENT, 4);
-  rowSprite_.pushSprite(148, 42);
+  rowSprite_.pushSprite(148, 59);
 }
 
 void Display::drawMinVoltage(const BmsData& d) {
@@ -619,7 +666,7 @@ void Display::drawMinVoltage(const BmsData& d) {
   drawMetricRow(rowSprite_, 'V', "最低",
                 String(d.minCellVoltage, 3) + "V",
                 UI_MIN_VOLTAGE, 4);
-  rowSprite_.pushSprite(148, 80);
+  rowSprite_.pushSprite(148, 92);
 }
 
 void Display::drawRange(const BmsData& d) {
@@ -641,7 +688,7 @@ void Display::drawRange(const BmsData& d) {
       String(d.remainingRangeKm, 0) + " KM",
       164, 1, 4);
 
-  rowSprite_.pushSprite(148, 118);
+  rowSprite_.pushSprite(148, 125);
 }
 
 void Display::drawSocBar(const BmsData& d) {
@@ -652,7 +699,7 @@ void Display::drawSocBar(const BmsData& d) {
   if (ratio > 1.0f) ratio = 1.0f;
 
   const int16_t w = 312;
-  const int16_t h = 14;
+  const int16_t h = 12;
   int filled = (int)(w * ratio + 0.5f);
 
   for (int16_t x = 0; x < w; ++x) {
@@ -681,5 +728,5 @@ void Display::drawSocBar(const BmsData& d) {
   }
 
   barSprite_.drawRoundRect(0, 0, w, h, 3, TFT_DARKGREY);
-  barSprite_.pushSprite(4, 156);
+  barSprite_.pushSprite(4, 157);
 }
