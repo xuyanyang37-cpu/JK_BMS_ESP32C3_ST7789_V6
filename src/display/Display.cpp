@@ -290,40 +290,10 @@ void Display::drawFullPage(const BmsData& d) {
 
   if (d.bootState == BOOT_SCANNING ||
       d.bootState == BOOT_START) {
-    TFT_eSprite page(&tft_);
-    page.setColorDepth(16);
-    page.createSprite(320, 170);
-    page.fillSprite(TFT_BLACK);
-
-    FontGB2312::drawCenterString(page, 160, 7,
-                                 "连接电池",
-                                 TFT_CYAN, TFT_BLACK, 2);
-    FontGB2312::drawCenterString(
-        page, 160, 43,
-        d.statusMessage.length() ? d.statusMessage : "扫描蓝牙...",
-        TFT_WHITE, TFT_BLACK, 1);
-
-    int w = 250;
-    page.drawRoundRect(35, 72, w, 18, 5, TFT_DARKGREY);
-
-    int progress = (d.scanAttempt * 100) / 3;
-    if (progress > 100) progress = 100;
-
-    if (progress > 0) {
-      page.fillRoundRect(38, 75,
-                         (w - 6) * progress / 100,
-                         12, 4, TFT_BLUE);
-    }
-
-    FontGB2312::drawCenterString(page, 160, 96,
-                                 String(d.scanAttempt) + "/3",
-                                 TFT_YELLOW, TFT_BLACK, 1);
-    FontGB2312::drawCenterString(page, 160, 135,
-                                 "自动扫描并连接JK保护板",
-                                 TFT_LIGHTGREY, TFT_BLACK, 1);
-
-    page.pushSprite(0, 0);
-    page.deleteSprite();
+    // 上电扫描页禁止 320x170 全屏 Sprite。
+    // 参考 ESP32E28：启动阶段只显示轻量状态页，等真正拿到数据后
+    // 才创建仪表盘缓存，避免 BLE 初始化时瞬间吃掉大块连续 RAM。
+    drawScanningScreen(d, true);
     return;
   }
 
