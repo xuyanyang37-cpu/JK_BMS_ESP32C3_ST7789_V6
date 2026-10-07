@@ -27,7 +27,8 @@ const char* JkProtocol::name() const {
   return protocol32S_ ? Jk02_32S::name() : Jk02_24S::name();
 }
 
-// [识别] 判断这是不是JK帧。\nbool JkProtocol::canHandle(const uint8_t* p, size_t n) const {
+// [识别] 判断这是不是JK帧。
+bool JkProtocol::canHandle(const uint8_t* p, size_t n) const {
   if (!p || n < 4) return false;
 
   // JK02 新版 BLE TLV
@@ -40,7 +41,8 @@ const char* JkProtocol::name() const {
   return p[0] == 0xEB && p[1] == 0x90;
 }
 
-// [找帧头] 支持新版4E57和旧版55AAEB90。\nint JkProtocol::findFrameStart(const uint8_t* p, size_t n) const {
+// [找帧头] 支持新版4E57和旧版55AAEB90。
+int JkProtocol::findFrameStart(const uint8_t* p, size_t n) const {
   if (!p || n < 2) return -1;
 
   for (size_t i = 0; i + 1 < n; ++i) {
@@ -57,7 +59,8 @@ const char* JkProtocol::name() const {
   return -1;
 }
 
-// [算帧长] 新版4E57是变长，旧版固定300字节。\nsize_t JkProtocol::frameLength(const uint8_t* p, size_t n) const {
+// [算帧长] 新版4E57是变长，旧版固定300字节。
+size_t JkProtocol::frameLength(const uint8_t* p, size_t n) const {
   if (!p || n < 4) return 0;
 
   if (p[0] == 0x4E && p[1] == 0x57) {
@@ -177,7 +180,8 @@ int JkProtocol::detectOffset(const uint8_t*, size_t) const {
   return protocol32S_ ? Jk02_32S::DATA_OFFSET : Jk02_24S::DATA_OFFSET;
 }
 
-// [新版解析] 逐个Tag读取TLV字段。\nbool JkProtocol::parseNewTlvFrame(const uint8_t* p, size_t n, BmsData& o) {
+// [新版解析] 逐个Tag读取TLV字段。
+bool JkProtocol::parseNewTlvFrame(const uint8_t* p, size_t n, BmsData& o) {
   if (!p || n < 14 || p[0] != 0x4E || p[1] != 0x57) return false;
 
   size_t declared = (size_t)(((uint16_t)p[2] << 8) | p[3]) + 4U;
@@ -350,7 +354,8 @@ int JkProtocol::detectOffset(const uint8_t*, size_t) const {
   return d.valid;
 }
 
-// [旧版解析] 按24S/32S offset读取固定300字节数据。\nbool JkProtocol::parseOldFrame(const uint8_t* p, size_t n, BmsData& o) {
+// [旧版解析] 按24S/32S offset读取固定300字节数据。
+bool JkProtocol::parseOldFrame(const uint8_t* p, size_t n, BmsData& o) {
   int off = detectOffset(p, n);
 
   if (!p || n != 300 || n < (size_t)(184 + off)) return false;
@@ -479,7 +484,8 @@ bool JkProtocol::parseLegacyRs485Frame(const uint8_t* p, size_t n, BmsData& o) {
   return d.valid;
 }
 
-// [总入口] 根据帧头选择新版或旧版解析。\nbool JkProtocol::parseFrame(const uint8_t* p, size_t n, BmsData& o) {
+// [总入口] 根据帧头选择新版或旧版解析。
+bool JkProtocol::parseFrame(const uint8_t* p, size_t n, BmsData& o) {
   if (!canHandle(p, n)) return false;
 
   if (p[0] == 0x4E && p[1] == 0x57)
