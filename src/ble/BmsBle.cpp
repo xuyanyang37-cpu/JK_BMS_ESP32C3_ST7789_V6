@@ -421,7 +421,7 @@ void BmsBle::handleNotification(const uint8_t* d,size_t n){
       Preferences p;
       p.begin("jkcfg",false);
       String saved=p.getString("protocol","");
-      if(detected && detected[0] && strcmp(detected,"NONE")!=0 && detected!=saved){
+      if(detected && detected[0] && strcmp(detected,"NONE")!=0 && strcmp(detected,saved.c_str())!=0){
         p.putString("protocol",detected);
         Serial.printf("BMS protocol locked: %s\n",detected.c_str());
       }
