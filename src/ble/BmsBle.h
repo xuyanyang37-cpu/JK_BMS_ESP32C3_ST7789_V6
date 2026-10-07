@@ -5,13 +5,14 @@
 #include "../BmsData.h"
 #include "../protocol/BmsProtocolManager.h"
 
-#define BMS_SCAN_RESULT_MAX 8
+#define BMS_SCAN_RESULT_MAX 1
 
 struct BmsScanItem {
-  String address;
+  // 只保留RSSI最强的一个候选，固定数组避免String堆分配/碎片。
+  char address[18] = {0};
   uint8_t addressType=BLE_ADDR_PUBLIC;
-  String name;
-  int rssi=0;
+  char name[24] = {0};
+  int rssi=-127;
 };
 
 class BmsBle {
