@@ -19,6 +19,8 @@ private:
   TFT_eSprite barSprite_{&tft_};
 
   bool initialized_ = false;
+  // 主界面缓存只在 BLE/WiFi 启动完成、真正进入仪表盘后申请。
+  bool dashboardBuffersReady_ = false;
   bool firstDashboard_ = true;
   bool scanScreenInitialized_ = false;
   BmsBootState lastBootState_ = BOOT_START;
@@ -41,6 +43,7 @@ private:
   bool metricChanged(uint8_t metric, const BmsData& a, const BmsData& b) const;
 
   bool changed(float a, float b, float eps) const;
+  bool ensureDashboardBuffers();
 };
 
 #endif
