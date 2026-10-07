@@ -507,10 +507,10 @@ void Display::drawSoc(const BmsData& d) {
   const int16_t cx = 70;
   const int16_t cy = 51;
   const int16_t radius = 43;
-  socSprite_.drawArc(cx, cy, radius, radius - 3, 210, 330, UI_PANEL_DARK);
+  socSprite_.drawArc(cx, cy, radius, radius - 3, 210, 330, UI_PANEL_DARK, UI_PANEL, false);
   const int16_t endAngle = 210 + (static_cast<int16_t>(d.soc) * 120) / 100;
   if (endAngle > 210) {
-    socSprite_.drawArc(cx, cy, radius, radius - 3, 210, endAngle, color);
+    socSprite_.drawArc(cx, cy, radius, radius - 3, 210, endAngle, color, UI_PANEL, false);
   }
 
   socSprite_.pushSprite(4, 26);
