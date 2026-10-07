@@ -354,12 +354,12 @@ bool BmsBle::connectDeviceByIndex(uint8_t index){
   // ANT/TT 只有在已经保存并锁定对应协议时才发送自己的查询，
   // 避免连接 JK 后同时混发三套协议。
   // --------------------------------------------------------------
-  String proto=String(protocolManager_.protocolName());
+  const char* proto=protocolManager_.protocolName();
   delay(1000);  // dionipe: subscribe 后给 BMS 1 秒稳定时间
 
-  if(proto=="ANT"){
+  if(strcmp(proto,"ANT")==0){
     requestAntStatus();
-  } else if(proto=="TT"){
+  } else if(strcmp(proto,"TT")==0){
     request(0x03);
   } else if(strcmp(proto,"JBD")==0 || strcmp(proto,"DALY")==0){
     request(0x03);
