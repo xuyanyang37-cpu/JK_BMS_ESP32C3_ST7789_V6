@@ -68,13 +68,6 @@ BmsBle::BmsBle()
   protocolManager_.begin(protocol32S_);
   if(preferredProtocol.length()) protocolManager_.setPreferredProtocol(preferredProtocol);
 
-  // 预留固定容量，避免三轮扫描时反复扩容 String，
-  // 减少 ESP32-C3 堆碎片，为最后启动 SoftAP 留出连续内存。
-  for(uint8_t i=0;i<BMS_SCAN_RESULT_MAX;i++){
-    scanItems_[i].address.reserve(18);
-    scanItems_[i].name.reserve(24);
-  }
-
   return true;
 }
 
@@ -119,6 +112,13 @@ bool BmsBle::isCandidate(const NimBLEAdvertisedDevice* d) const{
 
 // [流程1] 扫描附近设备，只保留 JK/BMS/指定Service 的候选设备。\nuint8_t BmsBle::scanDevices(uint32_t sec){
   scanCount_=0;
+  // 每轮扫描只保留“符合候选条件且RSSI最强”的一个设备。
+  // 不保存其他设备，降低扫描结果RAM占用，也避免连接到较弱/错误的BMS。
+  scanItems_[0].address[0]=0;
+  scanItems_[0].name[0]=0;
+  scanItems_[0].addressType=BLE_ADDR_PUBLIC;
+  scanItems_[0].rssi=-127;
+
   NimBLEScan* s=NimBLEDevice::getScan();
   s->setActiveScan(true);
   s->setInterval(80);
@@ -191,11 +191,8 @@ bool BmsBle::isCandidate(const NimBLEAdvertisedDevice* d) const{
     return false;
   }
 
-  uint8_t best=0;
-  for(uint8_t i=1;i<scanCount_;i++)
-    if(scanItems_[i].rssi>scanItems_[best].rssi) best=i;
-
-  return connectDeviceByIndex(best);
+  // scanDevices() 已经只留下RSSI最强候选，无需再次排序/保存其他设备。
+  return connectDeviceByIndex(0);
 }
 
 bool BmsBle::connectDeviceByIndex(uint8_t index){
@@ -334,7 +331,7 @@ bool BmsBle::connectDeviceByIndex(uint8_t index){
     requestAntStatus();
   } else if(proto=="TT"){
     request(0x03);
-  } else if(proto=="JBD" || proto=="DALY"){
+  } else if(strcmp(proto,"JBD")==0 || strcmp(proto,"DALY")==0){
     request(0x03);
   } else {
     // JK：设备信息 -> 电芯/实时信息。
@@ -420,11 +417,11 @@ void BmsBle::handleNotification(const uint8_t* d,size_t n){
 
       // 自动识别成功后，把协议写入 Preferences。
       // 只有协议真正发生变化时才写 Flash，避免每一帧都产生擦写。
-      String detected=String(protocolManager_.protocolName());
+      const char* detected=protocolManager_.protocolName();
       Preferences p;
       p.begin("jkcfg",false);
       String saved=p.getString("protocol","");
-      if(detected.length() && detected!="NONE" && detected!=saved){
+      if(detected && detected[0] && strcmp(detected,"NONE")!=0 && detected!=saved){
         p.putString("protocol",detected);
         Serial.printf("BMS protocol locked: %s\n",detected.c_str());
       }
@@ -559,12 +556,12 @@ void BmsBle::loop(){
     return;
   }
 
-  String proto=String(protocolManager_.protocolName());
-  if(proto=="TT"){
+  const char* proto=protocolManager_.protocolName();
+  if(strcmp(proto,"TT")==0){
     if(now-lastRequest_>=250){ request(0x03); lastRequest_=now; }
-  } else if(proto=="ANT"){
+  } else if(strcmp(proto,"ANT")==0){
     if(now-lastRequest_>=2000){ requestAntStatus(); lastRequest_=now; }
-  } else if(proto=="JK"){
+  } else if(strcmp(proto,"JK")==0){
     // 与 dionipe 的常规 JK polling 保持一致：继续请求 CELL_INFO(0x96)。
     if(now-lastRequest_>=5000){ request(0x96); lastRequest_=now; }
   } else if(proto=="JBD" || proto=="DALY"){
