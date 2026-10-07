@@ -37,6 +37,7 @@ static const char* SERVICE="FFE0";
 static const char* JK_NOTIFY_UUID="FFE1";
 static const char* JK_WRITE_UUID="FFE2";
 BmsBle* BmsBle::instance_=nullptr;
+static BmsBle* g_scanOwner=nullptr;
 static uint8_t g_rxBuf[700];
 static size_t g_rxLen=0;
 static bool g_legacyAckSeen=false;
@@ -48,6 +49,7 @@ BmsBle::BmsBle()
     scanCount_(0),scanAttempt_(0),configuredAddressType_(BLE_ADDR_PUBLIC),
     protocol32S_(true),configuredAddress_("") {
   instance_=this;
+  g_scanOwner=this;
 }
 
 // [入口] BLE初始化。开机只调用一次。\nbool BmsBle::begin(){
@@ -102,15 +104,43 @@ void BmsBle::setStatus(BmsBootState state, const String& message){
 }
 
 bool BmsBle::isCandidate(const NimBLEAdvertisedDevice* d) const{
-  String n=d->getName().c_str();
-  n.toUpperCase();
+  if(!d) return false;
+  std::string n=d->getName();
+  for(size_t i=0;i<n.size();++i){
+    if(n[i]>='a' && n[i]<='z') n[i]=static_cast<char>(n[i]-'a'+'A');
+  }
   return d->isAdvertisingService(NimBLEUUID(SERVICE)) ||
-         n.indexOf("JK")>=0 || n.indexOf("JIKONG")>=0 || n.indexOf("BMS")>=0 ||
-         n.indexOf("ANT")>=0 || n.indexOf("JBD")>=0 || n.indexOf("DALY")>=0 ||
-         n.indexOf("TT")>=0 || n.indexOf("铁塔")>=0;
+         n.find("JK")!=std::string::npos || n.find("JIKONG")!=std::string::npos ||
+         n.find("BMS")!=std::string::npos || n.find("ANT")!=std::string::npos ||
+         n.find("JBD")!=std::string::npos || n.find("DALY")!=std::string::npos ||
+         n.find("TT")!=std::string::npos || n.find("铁塔")!=std::string::npos;
 }
 
-// [流程1] 扫描附近设备，只保留 JK/BMS/指定Service 的候选设备。\nuint8_t BmsBle::scanDevices(uint32_t sec){
+void BmsBle::onScanResult(const NimBLEAdvertisedDevice* d){
+  if(!isCandidate(d)) return;
+  const int rssi=d->getRSSI();
+  if(scanCount_!=0 && rssi<=scanItems_[0].rssi) return;
+  const std::string address=d->getAddress().toString();
+  const std::string name=d->haveName() ? d->getName() : std::string("JK-BMS");
+  snprintf(scanItems_[0].address,sizeof(scanItems_[0].address),"%s",address.c_str());
+  snprintf(scanItems_[0].name,sizeof(scanItems_[0].name),"%s",name.c_str());
+  scanItems_[0].addressType=d->getAddressType();
+  scanItems_[0].rssi=rssi;
+  scanCount_=1;
+}
+
+// [流程1] 扫描附近设备，只保留“候选条件满足且RSSI最强”的一个设备。
+namespace {
+class StrongestScanCallbacks : public NimBLEScanCallbacks {
+ public:
+  void onResult(const NimBLEAdvertisedDevice* d) override {
+    if(g_scanOwner) g_scanOwner->onScanResult(d);
+  }
+};
+StrongestScanCallbacks g_strongestScanCallbacks;
+}
+
+uint8_t BmsBle::scanDevices(uint32_t sec){
   scanCount_=0;
   // 每轮扫描只保留“符合候选条件且RSSI最强”的一个设备。
   // 不保存其他设备，降低扫描结果RAM占用，也避免连接到较弱/错误的BMS。
@@ -120,29 +150,28 @@ bool BmsBle::isCandidate(const NimBLEAdvertisedDevice* d) const{
   scanItems_[0].rssi=-127;
 
   NimBLEScan* s=NimBLEDevice::getScan();
+  if(!s) return 0;
+
+  s->setScanCallbacks(&g_strongestScanCallbacks, false);
+  s->setMaxResults(0);
   s->setActiveScan(true);
   s->setInterval(80);
   s->setWindow(60);
 
-  NimBLEScanResults r=s->getResults(sec*1000,false);
-  for(uint32_t i=0;(uint32_t)i<r.getCount() && scanCount_<BMS_SCAN_RESULT_MAX;i++){
-    const NimBLEAdvertisedDevice* d=r.getDevice(i);
-    if(!isCandidate(d)) continue;
-
-    scanItems_[scanCount_].address=d->getAddress().toString().c_str();
-    scanItems_[scanCount_].addressType=d->getAddressType();
-    scanItems_[scanCount_].name=d->getName().c_str();
-    if(scanItems_[scanCount_].name.length()==0) scanItems_[scanCount_].name="JK-BMS";
-    scanItems_[scanCount_].rssi=d->getRSSI();
-    Serial.printf("JK BLE: %s type=%u RSSI=%d\n",
-                  scanItems_[scanCount_].address.c_str(),
-                  scanItems_[scanCount_].addressType,
-                  scanItems_[scanCount_].rssi);
-    scanCount_++;
+  if(!s->start(sec*1000UL, false, true)){
+    s->stop();
+    s->clearResults();
+    return 0;
   }
 
   s->stop();
   s->clearResults();
+  if(scanCount_>0){
+    Serial.printf("JK BLE: strongest candidate %s type=%u RSSI=%d\n",
+                  scanItems_[0].address,
+                  scanItems_[0].addressType,
+                  scanItems_[0].rssi);
+  }
   return scanCount_;
 }
 
@@ -305,8 +334,9 @@ bool BmsBle::connectDeviceByIndex(uint8_t index){
 
   // 只有扫描得到的设备地址类型才写入配置。
   // 这样随机地址设备重启后也能用正确的 address type 连接。
-  setConfiguredAddress(address,addressType);
-
+  // 连接阶段只记录当前候选地址，不立即写入Preferences。
+  // 必须等收到有效BMS数据后，才正式保存快速连接目标。
+  configuredAddressType_=addressType;
   g_bmsData.mac=address;
   g_bmsData.online=true;
   g_bmsData.bootState=BOOT_CONNECTED;
@@ -415,6 +445,11 @@ void BmsBle::handleNotification(const uint8_t* d,size_t n){
       g_bmsData.updateMs=millis();
       lastRequest_=millis();
 
+      // 只有真正解析出有效BMS帧后，才保存当前候选MAC。
+      if(g_bmsData.mac.length()){
+        setConfiguredAddress(g_bmsData.mac,configuredAddressType_);
+      }
+
       // 自动识别成功后，把协议写入 Preferences。
       // 只有协议真正发生变化时才写 Flash，避免每一帧都产生擦写。
       const char* detected=protocolManager_.protocolName();
@@ -423,7 +458,7 @@ void BmsBle::handleNotification(const uint8_t* d,size_t n){
       String saved=p.getString("protocol","");
       if(detected && detected[0] && strcmp(detected,"NONE")!=0 && strcmp(detected,saved.c_str())!=0){
         p.putString("protocol",detected);
-        Serial.printf("BMS protocol locked: %s\n",detected.c_str());
+        Serial.printf("BMS protocol locked: %s\n",detected);
       }
       p.end();
     }
@@ -460,7 +495,7 @@ void BmsBle::request(uint8_t cmd){
   uint8_t f[20];
   if(!protocolManager_.buildCommand(cmd,counter_++,f)) return;
   size_t n=20;
-  if(String(protocolManager_.protocolName())=="TT") n=(cmd==0x03||cmd==0x18||cmd==0x01)?8:8;
+  if(strcmp(protocolManager_.protocolName(),"TT")==0) n=8;
   if(writer->canWriteNoResponse()) writer->writeValue(f,n,false);
   else if(writer->canWrite()) writer->writeValue(f,n,true);
 }
@@ -564,7 +599,7 @@ void BmsBle::loop(){
   } else if(strcmp(proto,"JK")==0){
     // 与 dionipe 的常规 JK polling 保持一致：继续请求 CELL_INFO(0x96)。
     if(now-lastRequest_>=5000){ request(0x96); lastRequest_=now; }
-  } else if(proto=="JBD" || proto=="DALY"){
+  } else if(strcmp(proto,"JBD")==0 || strcmp(proto,"DALY")==0){
     if(now-lastRequest_>=2000){ request(0x03); lastRequest_=now; }
   }
 }
