@@ -24,6 +24,8 @@ public:
   uint8_t scanDevices(uint32_t seconds=5);
   bool connectDeviceByIndex(uint8_t index);
   bool connected() const;
+  // NimBLE扫描回调：逐个广播结果处理，只保留RSSI最强候选。
+  void onScanResult(const NimBLEAdvertisedDevice* device);
   void releaseConnectionForHotspot();
   void loop();
   // setup()完成首次有效连接后调用，之后断线恢复才启用“连续3次失败进入热点”。
