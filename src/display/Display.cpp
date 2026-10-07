@@ -110,24 +110,48 @@ void Display::begin() {
   delay(30);
   digitalWrite(TFT_BL, HIGH);
 
+  // 关键内存优化：
+  // 上电/扫描/BLE连接阶段不创建任何长期 Sprite。
+  // 原版本这里一次申请约 40KB 的 RGB565 缓冲区，容易和 NimBLE/WiFi
+  // 同时启动时形成连续 RAM 压力。
+  // 主界面真正显示时才由 ensureDashboardBuffers() 懒加载。
+  initialized_ = true;
+  firstDashboard_ = true;
+  drawFullPage(g_bmsData);
+}
+
+bool Display::ensureDashboardBuffers() {
+  if (dashboardBuffersReady_) return true;
+
   socSprite_.setColorDepth(16);
   leftInfoSprite_.setColorDepth(16);
   rowSprite_.setColorDepth(16);
   barSprite_.setColorDepth(16);
 
-  socSprite_.createSprite(140, 109);
-  leftInfoSprite_.createSprite(140, 36);
-  rowSprite_.createSprite(168, 36);
-  barSprite_.createSprite(312, 14);
+  if (!socSprite_.createSprite(140, 91)) return false;
+  if (!leftInfoSprite_.createSprite(140, 36)) {
+    socSprite_.deleteSprite();
+    return false;
+  }
+  if (!rowSprite_.createSprite(168, 36)) {
+    leftInfoSprite_.deleteSprite();
+    socSprite_.deleteSprite();
+    return false;
+  }
+  if (!barSprite_.createSprite(312, 12)) {
+    rowSprite_.deleteSprite();
+    leftInfoSprite_.deleteSprite();
+    socSprite_.deleteSprite();
+    return false;
+  }
 
   socSprite_.fillSprite(TFT_BLACK);
   leftInfoSprite_.fillSprite(TFT_BLACK);
   rowSprite_.fillSprite(TFT_BLACK);
   barSprite_.fillSprite(TFT_BLACK);
 
-  initialized_ = true;
-  firstDashboard_ = true;
-  drawFullPage(g_bmsData);
+  dashboardBuffersReady_ = true;
+  return true;
 }
 
 // [显示流程2] 主循环每500ms调用。这里决定“整屏画”还是“局部刷新”。
@@ -195,18 +219,18 @@ void Display::drawScanningScreen(const BmsData& d, bool force) {
     TFT_eSprite scanSprite(&tft_);
     scanSprite.setColorDepth(16);
 
-    if (scanSprite.createSprite(320, 60)) {
+    if (scanSprite.createSprite(160, 36)) {
       scanSprite.fillSprite(TFT_BLACK);
 
-      FontGB2312::drawCenterString(scanSprite, 160, 7,
+      FontGB2312::drawCenterString(scanSprite, 80, 3,
                                    "连接电池",
                                    TFT_CYAN, TFT_BLACK, 2);
 
-      FontGB2312::drawCenterString(scanSprite, 160, 43,
+      FontGB2312::drawCenterString(scanSprite, 80, 22,
                                    "扫描蓝牙电池",
                                    TFT_WHITE, TFT_BLACK, 1);
 
-      scanSprite.pushSprite(0, 0);
+      scanSprite.pushSprite(80, 0);
       scanSprite.deleteSprite();
     }
 
@@ -217,14 +241,14 @@ void Display::drawScanningScreen(const BmsData& d, bool force) {
     TFT_eSprite bottomSprite(&tft_);
     bottomSprite.setColorDepth(16);
 
-    if (bottomSprite.createSprite(320, 35)) {
+    if (bottomSprite.createSprite(240, 28)) {
       bottomSprite.fillSprite(TFT_BLACK);
 
-      FontGB2312::drawCenterString(bottomSprite, 160, 5,
+      FontGB2312::drawCenterString(bottomSprite, 120, 4,
                                    "自动扫描并连接JK保护板",
                                    TFT_LIGHTGREY, TFT_BLACK, 1);
 
-      bottomSprite.pushSprite(0, 130);
+      bottomSprite.pushSprite(40, 132);
       bottomSprite.deleteSprite();
     }
   }
@@ -256,31 +280,6 @@ void Display::drawScanningScreen(const BmsData& d, bool force) {
                                TFT_YELLOW, TFT_BLACK, 1);
   countSprite.pushSprite(120, 96);
   countSprite.deleteSprite();
-}
-
-static void drawHeader(TFT_eSprite& sprite, const BmsData& d) {
-  sprite.fillSprite(TFT_BLACK);
-
-  // 参考 ESP32E28：顶部只保留身份/状态信息，不把“已连接”等长文本放进主数据区。
-  sprite.fillRoundRect(4, 2, 312, 20, 5, UI_HEADER);
-
-  FontGB2312::drawText(sprite, 10, 4,
-                       "BMS", TFT_YELLOW, UI_HEADER, 1);
-  FontGB2312::drawText(sprite, 11, 4,
-                       "BMS", TFT_YELLOW, UI_HEADER, 1);
-
-  String name = d.deviceName.length() ? d.deviceName : "JK BMS";
-  if (name.length() > 12) name = name.substring(0, 12);
-  sprite.setTextColor(TFT_WHITE, UI_HEADER);
-  sprite.drawCentreString(name, 160, 4, 2);
-
-  // 简洁蓝牙图标，连接状态仍由图标表达，不占用数据框。
-  const uint16_t bt = d.online ? TFT_CYAN : TFT_DARKGREY;
-  sprite.drawLine(300, 5, 300, 19, bt);
-  sprite.drawLine(300, 5, 306, 10, bt);
-  sprite.drawLine(306, 10, 300, 15, bt);
-  sprite.drawLine(300, 15, 306, 20, bt);
-  sprite.drawLine(306, 20, 300, 15, bt);
 }
 
 void Display::drawFullPage(const BmsData& d) {
@@ -441,16 +440,33 @@ void Display::drawFullPage(const BmsData& d) {
 }
 
 void Display::drawDashboard(const BmsData& d, bool force) {
+  // 只有真正进入数据仪表盘才申请长期 Sprite。
+  if (!ensureDashboardBuffers()) {
+    // 内存不足时保留轻量启动页，不强行申请大块连续 RAM。
+    tft_.fillRect(0, 145, 320, 25, TFT_BLACK);
+    tft_.drawCentreString("LOW MEMORY", 160, 150, 2);
+    return;
+  }
+
   if (force) {
     tft_.fillScreen(TFT_BLACK);
 
-    TFT_eSprite header(&tft_);
-    header.setColorDepth(16);
-    if (header.createSprite(320, 24)) {
-      drawHeader(header, d);
-      header.pushSprite(0, 0);
-      header.deleteSprite();
-    }
+    // 顶部区域不用 Sprite，直接绘制，避免又申请一块 15KB 左右的缓存。
+    tft_.fillRoundRect(4, 2, 312, 20, 5, UI_HEADER);
+    tft_.setTextColor(TFT_YELLOW, UI_HEADER);
+    tft_.drawString("BMS", 10, 4, 1);
+
+    String name = d.deviceName.length() ? d.deviceName : "JK BMS";
+    if (name.length() > 12) name = name.substring(0, 12);
+    tft_.setTextColor(TFT_WHITE, UI_HEADER);
+    tft_.drawCentreString(name, 160, 4, 2);
+
+    const uint16_t bt = d.online ? TFT_CYAN : TFT_DARKGREY;
+    tft_.drawLine(300, 5, 300, 19, bt);
+    tft_.drawLine(300, 5, 306, 10, bt);
+    tft_.drawLine(306, 10, 300, 15, bt);
+    tft_.drawLine(300, 15, 306, 20, bt);
+    tft_.drawLine(306, 20, 300, 15, bt);
 
     drawSoc(d);
     drawConfiguredRow(0, d);
