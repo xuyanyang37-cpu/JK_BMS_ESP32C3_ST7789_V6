@@ -44,6 +44,7 @@ static bool g_legacyAckSeen=false;
 
 BmsBle::BmsBle()
   : client_(nullptr),ch_(nullptr),writeCh_(nullptr),notifyCh_(nullptr),
+    yanyangDecoder_(onYanyangStatus,onYanyangDeviceInfo),yanyangMode_(false),
     counter_(0),lastRequest_(0),lastReconnectAttempt_(0),recoveryVerifyStart_(0),
     recoveryFailures_(0),runtimeRecoveryEnabled_(false),
     scanCount_(0),scanAttempt_(0),configuredAddressType_(BLE_ADDR_PUBLIC),
@@ -69,13 +70,26 @@ bool BmsBle::begin(){
   p.end();
 
   protocolManager_.begin(protocol32S_);
-  if(preferredProtocol.length()) protocolManager_.setPreferredProtocol(preferredProtocol);
+  if(preferredProtocol.length()) setPreferredProtocol(preferredProtocol);
 
   return true;
 }
 
 void BmsBle::setPreferredProtocol(const String& name){
-  if(protocolManager_.setPreferredProtocol(name)){
+  String normalized=name;
+  normalized.trim();
+  normalized.toUpperCase();
+  if(normalized=="YANYANG" || normalized=="YY" || normalized=="彦阳"){
+    yanyangMode_=true;
+    yanyangDecoder_.reset();
+    Preferences p;
+    p.begin("jkcfg",false);
+    p.putString("protocol","YANYANG");
+    p.end();
+    return;
+  }
+  yanyangMode_=false;
+  if(protocolManager_.setPreferredProtocol(normalized)){
     Preferences p;
     p.begin("jkcfg",false);
     p.putString("protocol",protocolManager_.preferredProtocolName());
@@ -84,7 +98,7 @@ void BmsBle::setPreferredProtocol(const String& name){
 }
 
 String BmsBle::getPreferredProtocol() const {
-  return String(protocolManager_.preferredProtocolName());
+  return String(protocolName());
 }
 
 void BmsBle::setConfiguredAddress(const String& mac, uint8_t addressType){
@@ -320,6 +334,7 @@ bool BmsBle::connectDeviceByIndex(uint8_t index){
   ch_=writeCh_;
   g_rxLen=0;
   g_legacyAckSeen=false;
+  if(yanyangMode_) yanyangDecoder_.reset();
   bool subscribed=false;
   if(notifyCh_->canNotify()) subscribed=notifyCh_->subscribe(true,notifyCallback);
   else if(notifyCh_->canIndicate()) subscribed=notifyCh_->subscribe(false,notifyCallback);
@@ -355,10 +370,12 @@ bool BmsBle::connectDeviceByIndex(uint8_t index){
   // ANT/TT 只有在已经保存并锁定对应协议时才发送自己的查询，
   // 避免连接 JK 后同时混发三套协议。
   // --------------------------------------------------------------
-  const char* proto=protocolManager_.protocolName();
+  const char* proto=protocolName();
   delay(1000);  // dionipe: subscribe 后给 BMS 1 秒稳定时间
 
-  if(strcmp(proto,"ANT")==0){
+  if(strcmp(proto,"YANYANG")==0){
+    requestYanyangStatus();
+  } else if(strcmp(proto,"ANT")==0){
     requestAntStatus();
   } else if(strcmp(proto,"TT")==0){
     request(0x03);
@@ -384,6 +401,7 @@ void BmsBle::notifyCallback(NimBLERemoteCharacteristic*,uint8_t* d,size_t n,bool
 // 兼容：半帧、粘包、噪声、FC xx 06 短ACK；完整帧再交给 BmsProtocolManager。
 void BmsBle::handleNotification(const uint8_t* d,size_t n){
   if(!d || n==0) return;
+  if(yanyangMode_){ yanyangDecoder_.feed(d,n); return; }
   Serial.printf("BMS RX notify len=%u: ",(unsigned)n);
   size_t dump=n<24?n:24;
   for(size_t i=0;i<dump;i++) Serial.printf("%02X ",d[i]);
@@ -468,6 +486,52 @@ void BmsBle::handleNotification(const uint8_t* d,size_t n){
     g_rxLen-=expected;
   }
   if(g_legacyAckSeen && g_rxLen==0){ lastRequest_=0; g_legacyAckSeen=false; }
+}
+
+void BmsBle::onYanyangStatus(const BmsData& data){
+  // 更新遥测字段，不覆盖网页配置、MAC和启动状态等本机字段。
+  g_bmsData.valid=data.valid;
+  g_bmsData.online=true;
+  g_bmsData.updateMs=data.updateMs;
+  g_bmsData.cellCount=data.cellCount;
+  for(uint8_t i=0;i<JK_MAX_CELLS;i++) g_bmsData.cellVoltage[i]=data.cellVoltage[i];
+  g_bmsData.minCellVoltage=data.minCellVoltage;
+  g_bmsData.maxCellVoltage=data.maxCellVoltage;
+  g_bmsData.deltaCellVoltage=data.deltaCellVoltage;
+  g_bmsData.averageCellVoltage=data.averageCellVoltage;
+  g_bmsData.minCell=data.minCell;
+  g_bmsData.maxCell=data.maxCell;
+  g_bmsData.totalVoltage=data.totalVoltage;
+  g_bmsData.current=data.current;
+  g_bmsData.power=data.power;
+  g_bmsData.soc=data.soc;
+  g_bmsData.soh=data.soh;
+  g_bmsData.temperature1=data.temperature1;
+  g_bmsData.temperature2=data.temperature2;
+  g_bmsData.mosTemperature=data.mosTemperature;
+  g_bmsData.temperatureCount=data.temperatureCount;
+  for(uint8_t i=0;i<5;i++) g_bmsData.temperatures[i]=data.temperatures[i];
+  g_bmsData.totalCapacityAh=data.totalCapacityAh;
+  g_bmsData.remainingCapacityAh=data.remainingCapacityAh;
+  g_bmsData.batteryType=data.batteryType;
+  g_bmsData.statusMessage="彦阳保护板数据已更新";
+  if(instance_ && g_bmsData.mac.length())
+    instance_->setConfiguredAddress(g_bmsData.mac,instance_->configuredAddressType_);
+}
+
+void BmsBle::onYanyangDeviceInfo(const char* hardwareVersion,const char* softwareVersion){
+  Serial.printf("Yanyang BMS detected: HW=%s SW=%s\n",
+                hardwareVersion ? hardwareVersion : "unknown",
+                softwareVersion ? softwareVersion : "unknown");
+}
+
+void BmsBle::requestYanyangStatus(){
+  if(!writeCh_ && !ch_) return;
+  NimBLERemoteCharacteristic* writer=writeCh_ ? writeCh_ : ch_;
+  uint8_t frame[8];
+  YanyangProtocolDecoder::buildStatusRequest(0x01,frame);
+  if(writer->canWriteNoResponse()) writer->writeValue(frame,sizeof(frame),false);
+  else if(writer->canWrite()) writer->writeValue(frame,sizeof(frame),true);
 }
 
 void BmsBle::requestAntStatus(){
@@ -593,7 +657,9 @@ void BmsBle::loop(){
   }
 
   const char* proto=protocolManager_.protocolName();
-  if(strcmp(proto,"TT")==0){
+  if(strcmp(proto,"YANYANG")==0){
+    if(now-lastRequest_>=1000){ requestYanyangStatus(); lastRequest_=now; }
+  } else if(strcmp(proto,"TT")==0){
     if(now-lastRequest_>=250){ request(0x03); lastRequest_=now; }
   } else if(strcmp(proto,"ANT")==0){
     if(now-lastRequest_>=2000){ requestAntStatus(); lastRequest_=now; }
