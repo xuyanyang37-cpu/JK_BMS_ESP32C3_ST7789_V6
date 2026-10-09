@@ -11,6 +11,7 @@ public:
   bool parseFrame(const uint8_t*,size_t,BmsData&) override;
   bool buildCommand(uint8_t,uint8_t,uint8_t[20]) override;
   size_t expectedFrameLength() const override { return expectedLen_; }
+  size_t frameLength(const uint8_t*,size_t) const override;
   size_t commandLength(uint8_t cmd) const;
 private:
   mutable size_t expectedLen_=63;
