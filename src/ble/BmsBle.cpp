@@ -190,7 +190,8 @@ uint8_t BmsBle::scanDevices(uint32_t sec){
   return scanCount_;
 }
 
-// [流程2] 一次完整的“扫描 -> 选设备 -> 连接”业务。main.cpp负责最多调用3轮。\nbool BmsBle::scanAndConnect(uint32_t sec, uint8_t attemptOverride){
+// [流程2] 一次完整的“扫描 -> 选设备 -> 连接”业务。main.cpp负责最多调用3轮。
+bool BmsBle::scanAndConnect(uint32_t sec, uint8_t attemptOverride){
   if(connected() && g_bmsData.valid) return true;
 
   if(connected()){
@@ -244,7 +245,8 @@ bool BmsBle::connectDeviceByIndex(uint8_t index){
   return connectByAddress(scanItems_[index].address,scanItems_[index].addressType);
 }
 
-// [流程3] 按MAC连接，并完成 GATT 服务、读写特征、通知订阅。\nbool BmsBle::connectByAddress(const String& address,uint8_t addressType){
+// [流程3] 按MAC连接，并完成 GATT 服务、读写特征、通知订阅。
+bool BmsBle::connectByAddress(const String& address,uint8_t addressType){
   if(address.length()==0) return false;
 
   NimBLEAddress addr(address.c_str(),addressType);
@@ -676,7 +678,8 @@ bool BmsBle::connected() const{
   return client_ && client_->isConnected();
 }
 
-// [释放] 三次失败进入热点前，必须释放 BLE Client 和扫描资源。\nvoid BmsBle::releaseConnectionForHotspot(){
+// [释放] 三次失败进入热点前，必须释放 BLE Client 和扫描资源。
+void BmsBle::releaseConnectionForHotspot(){
   if(client_){
     if(client_->isConnected()) client_->disconnect();
     NimBLEDevice::deleteClient(client_);
