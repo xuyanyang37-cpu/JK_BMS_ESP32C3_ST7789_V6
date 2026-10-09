@@ -31,6 +31,8 @@ private:
   DalyProtocol dalyProtocol_;
   TtProtocol ttProtocol_;
   BmsProtocol* activeProtocol_;
+  // 仅用于当前接收缓冲区帧长计算；解析成功后才更新 activeProtocol_。
+  BmsProtocol* frameProtocol_;
 
   BmsProtocol* detectProtocol(const uint8_t*,size_t);
 };
