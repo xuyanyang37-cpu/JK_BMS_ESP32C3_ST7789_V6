@@ -30,6 +30,24 @@ int TtProtocol::findFrameStart(const uint8_t*d,size_t n) const{
     if((d[i]==0x01&&(d[i+1]==0x03||d[i+1]==0x01||(d[i+1]&0x80)))||d[i]==0xEF){ if(d[i]==0xEF && i+3<n) expectedLen_=7+d[i+3]; else if(i+2<n) expectedLen_=5+d[i+2]; return int(i); }
   return -1;
 }
+size_t TtProtocol::frameLength(const uint8_t* d,size_t n) const {
+  if(!d || n<2) return 0;
+  // Modbus RTU exception: slave + function|0x80 + exception + CRC16.
+  if(d[0]==0x01 && (d[1]&0x80U)) return 5;
+  if(d[0]==0x01 && (d[1]==0x03 || d[1]==0x01)) {
+    if(n<3) return 0;
+    if(d[2]>64) return 0;
+    return size_t(5U+d[2]);
+  }
+  // EF proprietary frame: 7-byte overhead plus the length field at byte 3.
+  if(d[0]==0xEF) {
+    if(n<4) return 0;
+    size_t total=7U+size_t(d[3]);
+    return total<=128U ? total : 0;
+  }
+  return 0;
+}
+
 bool TtProtocol::parseFrame(const uint8_t*d,size_t n,BmsData&o){
   if(!d||n<5) return false;
   if(d[0]==0xEF) return parseEf(d,n,o);
