@@ -29,6 +29,8 @@
  * ================================================================
  */
 
+#include <Arduino.h>
+#include <HardwareSerial.h>
 #include "BmsBle.h"
 #include <Preferences.h>
 #include <string.h>
