@@ -502,22 +502,17 @@ void BmsBle::onYanyangStatus(const BmsData& data){
   g_bmsData.minCellVoltage=data.minCellVoltage;
   g_bmsData.maxCellVoltage=data.maxCellVoltage;
   g_bmsData.deltaCellVoltage=data.deltaCellVoltage;
-  g_bmsData.averageCellVoltage=data.averageCellVoltage;
   g_bmsData.minCell=data.minCell;
   g_bmsData.maxCell=data.maxCell;
   g_bmsData.totalVoltage=data.totalVoltage;
   g_bmsData.current=data.current;
   g_bmsData.power=data.power;
   g_bmsData.soc=data.soc;
-  g_bmsData.soh=data.soh;
   g_bmsData.temperature1=data.temperature1;
   g_bmsData.temperature2=data.temperature2;
   g_bmsData.mosTemperature=data.mosTemperature;
-  g_bmsData.temperatureCount=data.temperatureCount;
-  for(uint8_t i=0;i<5;i++) g_bmsData.temperatures[i]=data.temperatures[i];
   g_bmsData.totalCapacityAh=data.totalCapacityAh;
   g_bmsData.remainingCapacityAh=data.remainingCapacityAh;
-  g_bmsData.batteryType=data.batteryType;
   g_bmsData.statusMessage="彦阳保护板数据已更新";
   if(instance_ && g_bmsData.mac.length() &&
      instance_->getConfiguredAddress()!=g_bmsData.mac)
