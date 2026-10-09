@@ -87,21 +87,17 @@ bool YanyangProtocolDecoder::parseStatusResponse(const uint8_t* f,size_t n) {
   d.valid=true; d.updateMs=millis();
   size_t r75=regOffset(75);
   d.cellCount=b[r75] > JK_MAX_CELLS ? JK_MAX_CELLS : b[r75];
-  d.batteryType=b[r75+1];
   d.totalVoltage=float(u32le(b+regOffset(76)))*0.001f;
   d.current=-float(i32le(b+regOffset(78)))*0.01f;
   for(uint8_t i=0;i<d.cellCount;i++) d.cellVoltage[i]=float(u16le(b+regOffset(uint16_t(81+i))))*0.001f;
   size_t r112=regOffset(112), r113=regOffset(113);
   d.mosTemperature=int16_t(b[r112+1])-40;
-  d.temperatureCount=2;
-  d.temperatures[0]=int16_t(b[r113+1])-40;
-  d.temperatures[1]=int16_t(b[r113])-40;
-  d.temperature1=d.temperatures[0]; d.temperature2=d.temperatures[1];
+  d.temperature1=int16_t(b[r113+1])-40;
+  d.temperature2=int16_t(b[r113])-40;
   d.totalCapacityAh=float(u16le(b+regOffset(118)))*0.1f;
   d.remainingCapacityAh=float(u16le(b+regOffset(119)))*0.1f;
   size_t r120=regOffset(120);
   d.soc=b[r120]<=100?b[r120]:100;
-  d.soh=b[r120+1]<=100?b[r120+1]:100;
   d.power=d.totalVoltage*d.current;
   if(d.cellCount==0 || !within(d.totalVoltage,1.0f,1000.0f) ||
      !within(fabsf(d.current),0.0f,2000.0f) ||
@@ -125,5 +121,4 @@ void YanyangProtocolDecoder::updateCellStatistics(BmsData& d) const {
   d.minCellVoltage=count?lo:0;
   d.maxCellVoltage=count?hi:0;
   d.deltaCellVoltage=count?hi-lo:0;
-  d.averageCellVoltage=count?sum/count:0;
 }
