@@ -86,8 +86,8 @@ size_t BmsProtocolManager::expectedFrameLength() const {
 }
 
 size_t BmsProtocolManager::frameLength(const uint8_t* p, size_t n) const {
-  BmsProtocol* p = frameProtocol_ ? frameProtocol_ : activeProtocol_;
-  return p ? p->frameLength(p, n) : 0;
+  BmsProtocol* parser = frameProtocol_ ? frameProtocol_ : activeProtocol_;
+  return parser ? parser->frameLength(p, n) : 0;
 }
 
 const char* BmsProtocolManager::protocolName() const {
