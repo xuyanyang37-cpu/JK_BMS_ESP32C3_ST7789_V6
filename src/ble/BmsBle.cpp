@@ -52,7 +52,8 @@ BmsBle::BmsBle()
   g_scanOwner=this;
 }
 
-// [入口] BLE初始化。开机只调用一次。\nbool BmsBle::begin(){
+// [入口] BLE初始化。开机只调用一次。
+bool BmsBle::begin(){
   NimBLEDevice::init("JK-C3-DISPLAY");
   NimBLEDevice::setPower(9);
 
