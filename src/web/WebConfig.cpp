@@ -141,9 +141,7 @@ String WebConfig::jsonEscape(const String& s){
     char c=s[i];
     if(c=='"') o+="\\\"";
     else if(c=='\\') o+="\\\\";
-    else if(c=='
-') o+="\
-";
+    else if(c=='\n') o+="\\n";
     else if(c=='\r') o+="\\r";
     else if(c=='\t') o+="\\t";
     else o+=c;
@@ -319,7 +317,7 @@ button{background:#1976d2;color:#fff}.danger{background:#b3261e}.gray{background
 <h2>← 保护板设置</h2>
 <div class="item"><b>当前保护板</b><br><span id="proto" class="num">读取中...</span><div id="detail" class="small">正在读取状态...</div></div>
 <div class="item"><b>手动选择保护板</b><br>
-<select id="sel"><option value="JK">极空 JK</option><option value="ANT">蚂蚁 ANT</option><option value="JBD">JBD</option><option value="DALY">Daly</option><option value="TT">铁塔</option></select>
+<select id="sel"><option value="JK">极空 JK</option><option value="ANT">蚂蚁 ANT</option><option value="JBD">JBD</option><option value="DALY">Daly</option><option value="TT">铁塔</option><option value="YANYANG">彦阳保护板</option></select>
 <br><button onclick="save()">保存保护板</button><button class="gray" onclick="location.href='/'">返回主页</button>
 </div>
 <div class="item"><b>协议识别</b><br><button onclick="load()">刷新识别结果</button><button class="danger" onclick="clearProto()">清除已保存协议</button></div>
@@ -512,7 +510,7 @@ void WebConfig::handleProtectionSave(){
   String name=server_.hasArg("protocol")?server_.arg("protocol"):"";
   name.trim();
   name.toUpperCase();
-  if(name!="JK" && name!="ANT" && name!="JBD" && name!="DALY" && name!="TT"){
+  if(name!="JK" && name!="ANT" && name!="JBD" && name!="DALY" && name!="TT" && name!="YANYANG"){
     server_.send(400,"application/json; charset=utf-8",R"({"message":"协议类型无效"})");
     return;
   }
