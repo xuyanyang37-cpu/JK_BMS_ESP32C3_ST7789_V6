@@ -187,9 +187,8 @@ bool JkProtocol::parseNewTlvFrame(const uint8_t* p, size_t n, BmsData& o) {
   size_t declared = (size_t)(((uint16_t)p[2] << 8) | p[3]) + 4U;
   if (declared != n || declared > FRAME_MAX) return false;
 
-  BmsData d;
-  // 保留网页配置的每公里耗电量，避免每次 BMS 更新后被默认值 100 覆盖。
-  d.energyConsumptionWhKm = o.energyConsumptionWhKm;
+  // 先复制共享数据，再只更新协议遥测字段；避免清空 MAC、网页配置、启动状态等本机字段。
+  BmsData d = o;
   const uint8_t* cur = p + 10;       // 4E57 + length + address/type/counter
   const uint8_t* end = p + n - 4;    // last 4 bytes are frame checksum
 
