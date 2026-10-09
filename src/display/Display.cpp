@@ -1,5 +1,5 @@
 #include "Display.h"
-#include "FontGB2312.h"
+#include "../font/FontGB2312.h"
 #include <math.h>
 #include <stdint.h>
 
