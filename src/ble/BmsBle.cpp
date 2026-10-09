@@ -515,7 +515,8 @@ void BmsBle::onYanyangStatus(const BmsData& data){
   g_bmsData.remainingCapacityAh=data.remainingCapacityAh;
   g_bmsData.batteryType=data.batteryType;
   g_bmsData.statusMessage="彦阳保护板数据已更新";
-  if(instance_ && g_bmsData.mac.length())
+  if(instance_ && g_bmsData.mac.length() &&
+     instance_->getConfiguredAddress()!=g_bmsData.mac)
     instance_->setConfiguredAddress(g_bmsData.mac,instance_->configuredAddressType_);
 }
 
