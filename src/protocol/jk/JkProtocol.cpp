@@ -187,9 +187,23 @@ bool JkProtocol::parseNewTlvFrame(const uint8_t* p, size_t n, BmsData& o) {
   size_t declared = (size_t)(((uint16_t)p[2] << 8) | p[3]) + 4U;
   if (declared != n || declared > FRAME_MAX) return false;
 
-  BmsData d;
-  // 保留网页配置的每公里耗电量，避免每次 BMS 更新后被默认值 100 覆盖。
-  d.energyConsumptionWhKm = o.energyConsumptionWhKm;
+  // 保留 MAC、网页配置、启动状态等本机字段，但每帧遥测字段先清零，
+  // 避免旧帧缺少某个 Tag 时把上一次的电压/温度误当成本次数据。
+  BmsData d = o;
+  d.valid = false;
+  d.online = false;
+  d.cellCount = 0;
+  for (uint8_t i = 0; i < JK_MAX_CELLS; ++i) d.cellVoltage[i] = 0.0f;
+  d.minCellVoltage = d.maxCellVoltage = d.deltaCellVoltage = 0.0f;
+  d.minCell = d.maxCell = 0;
+  d.totalVoltage = d.current = d.power = d.soc = 0.0f;
+  d.temperature1 = d.temperature2 = d.mosTemperature = 0.0f;
+  d.totalCapacityAh = d.remainingCapacityAh = 0.0f;
+  d.remainingRangeKm = 0.0f;
+  d.cycleCount = 0;
+  d.errors = 0;
+  d.charging = d.discharging = d.balancing = d.heating = false;
+  d.balancingCurrent = 0.0f;
   const uint8_t* cur = p + 10;       // 4E57 + length + address/type/counter
   const uint8_t* end = p + n - 4;    // last 4 bytes are frame checksum
 
