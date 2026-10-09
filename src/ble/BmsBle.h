@@ -4,6 +4,7 @@
 #include <NimBLEDevice.h>
 #include "../BmsData.h"
 #include "../protocol/BmsProtocolManager.h"
+#include "../protocol/yanyang_protocol.h"
 
 #define BMS_SCAN_RESULT_MAX 1
 
@@ -41,7 +42,7 @@ public:
   bool isProtocol32S() const { return protocol32S_; }
   void setPreferredProtocol(const String& name);
   String getPreferredProtocol() const;
-  const char* protocolName() const { return protocolManager_.protocolName(); }
+  const char* protocolName() const { return yanyangMode_ ? "YANYANG" : protocolManager_.protocolName(); }
 
 private:
   NimBLEClient* client_;
@@ -49,6 +50,8 @@ private:
   NimBLERemoteCharacteristic* writeCh_;
   NimBLERemoteCharacteristic* notifyCh_;
   BmsProtocolManager protocolManager_;
+  YanyangProtocolDecoder yanyangDecoder_;
+  bool yanyangMode_;
   uint8_t counter_;
   uint32_t lastRequest_;
   uint32_t lastReconnectAttempt_;
@@ -64,10 +67,13 @@ private:
 
   static BmsBle* instance_;
   static void notifyCallback(NimBLERemoteCharacteristic*,uint8_t*,size_t,bool);
+  static void onYanyangStatus(const BmsData& data);
+  static void onYanyangDeviceInfo(const char* hardwareVersion, const char* softwareVersion);
   void handleNotification(const uint8_t*,size_t);
   void request(uint8_t);
   void requestAntStatus();
   void requestTtProbe();
+  void requestYanyangStatus();
   bool isCandidate(const NimBLEAdvertisedDevice*) const;
   void setStatus(BmsBootState state,const String& message);
 };
