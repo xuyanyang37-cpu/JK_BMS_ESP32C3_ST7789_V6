@@ -130,7 +130,8 @@ bool BmsBle::isCandidate(const NimBLEAdvertisedDevice* d) const{
          n.find("JK")!=std::string::npos || n.find("JIKONG")!=std::string::npos ||
          n.find("BMS")!=std::string::npos || n.find("ANT")!=std::string::npos ||
          n.find("JBD")!=std::string::npos || n.find("DALY")!=std::string::npos ||
-         n.find("TT")!=std::string::npos || n.find("铁塔")!=std::string::npos ||\n         n.find("YANYANG")!=std::string::npos || n.find("YY")!=std::string::npos || n.find("彦阳")!=std::string::npos;
+         n.find("TT")!=std::string::npos || n.find("铁塔")!=std::string::npos ||
+         n.find("YANYANG")!=std::string::npos || n.find("YY")!=std::string::npos || n.find("彦阳")!=std::string::npos;
 }
 
 void BmsBle::onScanResult(const NimBLEAdvertisedDevice* d){
