@@ -1,4 +1,5 @@
 name: ESP32-C3 PlatformIO Build
+# Re-run after source audit
 
 on:
   push:
