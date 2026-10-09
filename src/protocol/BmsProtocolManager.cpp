@@ -7,11 +7,12 @@
  */
 #include "BmsProtocolManager.h"
 
-BmsProtocolManager::BmsProtocolManager() : activeProtocol_(nullptr) {}
+BmsProtocolManager::BmsProtocolManager() : activeProtocol_(nullptr), frameProtocol_(nullptr) {}
 
 void BmsProtocolManager::begin(bool protocol32S) {
   jkProtocol_.setProtocol32S(protocol32S);
   activeProtocol_ = &jkProtocol_;
+  frameProtocol_ = nullptr;
 }
 
 void BmsProtocolManager::setProtocol32S(bool enable) {
@@ -26,11 +27,11 @@ bool BmsProtocolManager::setPreferredProtocol(const String& name) {
   String n = name;
   n.trim();
   n.toUpperCase();
-  if (n == "JK") { activeProtocol_ = &jkProtocol_; return true; }
-  if (n == "ANT") { activeProtocol_ = &antProtocol_; return true; }
-  if (n == "JBD") { activeProtocol_ = &jbdProtocol_; return true; }
-  if (n == "DALY") { activeProtocol_ = &dalyProtocol_; return true; }
-  if (n == "TT" || n == "IRON_TOWER") { activeProtocol_ = &ttProtocol_; return true; }
+  if (n == "JK") { activeProtocol_ = &jkProtocol_; frameProtocol_ = nullptr; return true; }
+  if (n == "ANT") { activeProtocol_ = &antProtocol_; frameProtocol_ = nullptr; return true; }
+  if (n == "JBD") { activeProtocol_ = &jbdProtocol_; frameProtocol_ = nullptr; return true; }
+  if (n == "DALY") { activeProtocol_ = &dalyProtocol_; frameProtocol_ = nullptr; return true; }
+  if (n == "TT" || n == "IRON_TOWER") { activeProtocol_ = &ttProtocol_; frameProtocol_ = nullptr; return true; }
   return false;
 }
 
@@ -51,8 +52,9 @@ bool BmsProtocolManager::parseFrame(const uint8_t* d, size_t n, BmsData& o) {
   BmsProtocol* p = detectProtocol(d, n);
   if (!p) return false;
   // 只有解析器确认完整帧有效后才锁定当前协议，避免坏帧误切换协议。
-  if (!p->parseFrame(d, n, o)) return false;
+  if (!p->parseFrame(d, n, o)) { frameProtocol_ = nullptr; return false; }
   activeProtocol_ = p;
+  frameProtocol_ = nullptr;
   return true;
 }
 
@@ -74,7 +76,8 @@ int BmsProtocolManager::findFrameStart(const uint8_t* d, size_t n) {
     }
   }
   // 关键修复：不能因为后面某个协议也找到帧头，就覆盖最早帧头对应的协议。
-  if (bestProtocol) activeProtocol_ = bestProtocol;
+  // 帧头候选只影响本帧长度计算，不立即切换活动协议/后续命令。
+  frameProtocol_ = bestProtocol;
   return best;
 }
 
@@ -83,7 +86,8 @@ size_t BmsProtocolManager::expectedFrameLength() const {
 }
 
 size_t BmsProtocolManager::frameLength(const uint8_t* p, size_t n) const {
-  return activeProtocol_ ? activeProtocol_->frameLength(p, n) : 0;
+  BmsProtocol* p = frameProtocol_ ? frameProtocol_ : activeProtocol_;
+  return p ? p->frameLength(p, n) : 0;
 }
 
 const char* BmsProtocolManager::protocolName() const {
