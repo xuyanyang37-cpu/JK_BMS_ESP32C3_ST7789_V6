@@ -141,9 +141,7 @@ String WebConfig::jsonEscape(const String& s){
     char c=s[i];
     if(c=='"') o+="\\\"";
     else if(c=='\\') o+="\\\\";
-    else if(c=='
-') o+="\
-";
+    else if(c=='\n') o+="\\n";
     else if(c=='\r') o+="\\r";
     else if(c=='\t') o+="\\t";
     else o+=c;
