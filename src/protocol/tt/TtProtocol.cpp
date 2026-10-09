@@ -92,59 +92,62 @@ bool TtProtocol::parseModbus(const uint8_t* f,size_t n,BmsData& o){
 
   // 0x03 / 58字节寄存器响应：完整TT电池状态帧。
   if(f[1]!=0x03 || f[2]!=58 || n!=63) return false;
+  // 使用临时副本解析，只有所有关键字段校验通过才提交，避免坏数据污染共享状态。
+  BmsData d=o;
 
   uint16_t tv=be16(f+3);
   if(tv==0xFFFD){
-    o.valid=false;
-    o.online=true;
+    d.valid=false;
+    d.online=true;
     return false;
   }
 
   uint8_t cells=uint8_t(be16(f+5));
   if(cells>20) cells=20;
 
-  o.totalVoltage=tv*0.01f;
-  o.cellCount=cells;
-  o.soc=be16(f+7);
-  if(o.soc>100) o.soc=100;
-  o.remainingCapacityAh=be16(f+9)*0.01f;
-  if(o.totalCapacityAh<=0.0f) o.totalCapacityAh=o.remainingCapacityAh;
-  o.current=decodeCurrent(be16(f+13))*0.01f;
+  d.totalVoltage=tv*0.01f;
+  d.cellCount=cells;
+  d.soc=be16(f+7);
+  if(d.soc>100) d.soc=100;
+  d.remainingCapacityAh=be16(f+9)*0.01f;
+  if(d.totalCapacityAh<=0.0f) d.totalCapacityAh=d.remainingCapacityAh;
+  d.current=decodeCurrent(be16(f+13))*0.01f;
 
   int t1=decodeTemp(be16(f+15));
   int t2=decodeTemp(be16(f+17));
   int t3=decodeTemp(be16(f+19));
-  o.temperature1=(t1==-128)?0:t1;
-  o.temperature2=(t2==-128)?0:t2;
-  o.mosTemperature=(t3==-128)?0:t3;
+  d.temperature1=(t1==-128)?0:t1;
+  d.temperature2=(t2==-128)?0:t2;
+  d.mosTemperature=(t3==-128)?0:t3;
 
   float minV=100.0f,maxV=0.0f;
   uint8_t minC=0,maxC=0;
-  for(uint8_t i=0;i<JK_MAX_CELLS;i++) o.cellVoltage[i]=0;
+  for(uint8_t i=0;i<JK_MAX_CELLS;i++) d.cellVoltage[i]=0;
 
   for(uint8_t i=0;i<cells;i++){
     float v=be16(f+21+i*2)*0.001f;
-    o.cellVoltage[i]=v;
+    d.cellVoltage[i]=v;
     if(v>=0.5f && v<=6.0f){
       if(v<minV){minV=v;minC=i+1;}
       if(v>maxV){maxV=v;maxC=i+1;}
     }
   }
 
-  o.minCellVoltage=(minV<100.0f)?minV:0.0f;
-  o.maxCellVoltage=maxV;
-  o.deltaCellVoltage=(maxV>0.0f && minV<100.0f)?maxV-minV:0.0f;
-  o.minCell=minC;
-  o.maxCell=maxC;
-  o.power=o.totalVoltage*o.current;
-  o.online=true;
-  o.valid=(o.totalVoltage>0.5f && o.cellCount>0);
-  o.updateMs=millis();
+  d.minCellVoltage=(minV<100.0f)?minV:0.0f;
+  d.maxCellVoltage=maxV;
+  d.deltaCellVoltage=(maxV>0.0f && minV<100.0f)?maxV-minV:0.0f;
+  d.minCell=minC;
+  d.maxCell=maxC;
+  d.power=d.totalVoltage*d.current;
+  d.online=true;
+  d.valid=(d.totalVoltage>0.5f && d.cellCount>0);
+  d.updateMs=millis();
 
-  if(o.energyConsumptionWhKm>1.0f)
-    o.remainingRangeKm=(o.remainingCapacityAh*o.totalVoltage)/o.energyConsumptionWhKm;
+  if(d.energyConsumptionWhKm>1.0f)
+    d.remainingRangeKm=(d.remainingCapacityAh*d.totalVoltage)/d.energyConsumptionWhKm;
 
-  return o.valid;
+  if(d.valid) o=d;
+  return d.valid;
 }
 bool TtProtocol::parseEf(const uint8_t*f,size_t n,BmsData&o){
   if(n<7||f[0]!=0xEF||f[n-1]!=0x16)return false;
